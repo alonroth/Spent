@@ -159,6 +159,17 @@ export function TransactionsPage() {
         </div>
 
         <TransactionsTable
+          key={[
+            from,
+            to,
+            search,
+            categoryFilter.join(","),
+            accountFilter.join(","),
+            page,
+            kind,
+            sortField,
+            sortOrder,
+          ].join("|")}
           transactions={transactionsQuery.data?.transactions ?? []}
           total={transactionsQuery.data?.total ?? 0}
           categories={categoriesQuery.data ?? []}
