@@ -133,10 +133,11 @@ export function testBankConnection(
 }
 
 export function saveAIConfig(config: {
-  provider: "claude" | "ollama" | "none";
+  provider: "claude" | "gemini" | "ollama" | "none";
   apiKey?: string;
   ollamaUrl?: string;
   ollamaModel?: string;
+  geminiModel?: "gemini-3.7-flash" | "gemini-3.5-flash-lite";
 }) {
   return fetchJSON<{ success: boolean }>("/api/setup/ai", {
     method: "POST",

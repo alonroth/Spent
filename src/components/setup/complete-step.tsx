@@ -33,6 +33,8 @@ export function CompleteStep({ onFinish }: CompleteStepProps) {
   const aiLabel =
     settings?.aiProvider === "claude"
       ? "Claude (Anthropic)"
+      : settings?.aiProvider === "gemini"
+        ? `Gemini · ${settings?.geminiModel ?? "gemini-3.7-flash"}`
       : settings?.aiProvider === "ollama"
         ? `Ollama · ${settings?.ollamaModel ?? "local"}`
         : "Manual categorization";

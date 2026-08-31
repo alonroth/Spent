@@ -76,13 +76,16 @@ export interface WorkspaceSummary {
   aiWarning: string | null;
 }
 
-export function friendlyAIError(err: unknown, modelName: string): string {
+export function friendlyAIError(err: unknown, modelName: string, provider?: string): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/model.*not found|pull.*model|404/i.test(msg)) {
     return `Ollama model "${modelName}" is not installed. Run: ollama pull ${modelName}`;
   }
   if (/ECONNREFUSED|fetch failed/i.test(msg)) {
     return "Ollama is not reachable. Make sure it's installed and that no firewall is blocking port 11434.";
+  }
+  if (provider === "gemini" || /Gemini|GoogleGenAI|generativelanguage/i.test(msg)) {
+    return "Gemini API request was rejected or rate-limited. Check your Gemini API key and quota in settings.";
   }
   if (/Anthropic|api[_-]?key|401|403/i.test(msg)) {
     return "Claude API request was rejected. Check your API key in settings.";
@@ -541,7 +544,7 @@ export async function syncWorkspace(
               err
             );
             if (!aiWarning) {
-              aiWarning = friendlyAIError(err, settings.ollamaModel);
+              aiWarning = friendlyAIError(err, settings.ollamaModel, settings.aiProvider);
             }
           }
         }
