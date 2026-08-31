@@ -37,6 +37,15 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3", "israeli-bank-scrapers"],
+  webpack(config, { isServer }) {
+    // Instrumentation is compiled separately from route handlers. Keep the
+    // Puppeteer-based scraper package as a runtime Node dependency there too,
+    // otherwise webpack follows its browser graph and tries to bundle `fs`.
+    if (isServer && Array.isArray(config.externals)) {
+      config.externals.push("israeli-bank-scrapers");
+    }
+    return config;
+  },
   devIndicators: false,
   async headers() {
     return [
