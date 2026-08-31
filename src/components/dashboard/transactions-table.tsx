@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -26,6 +27,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   MoreHorizontal,
@@ -34,10 +40,11 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Wallet,
+  Store,
   Tags,
   EyeOff,
   Eye,
-  X,
+  Trash2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -47,7 +54,9 @@ import {
   approveTransactionCategory,
   getCategories,
   setTransactionExcluded,
-  bulkUpdateTransactions,
+  deleteManualTransaction,
+  deployExpense,
+  reverseExpenseDeployment,
 } from "@/lib/api";
 import { toast } from "sonner";
 import { translateCategoryName, translateProviderName } from "@/lib/i18n-data";
@@ -80,14 +89,21 @@ import type { Locale } from "@/i18n/routing";
 
 type Kind = "expense" | "income" | "transfer";
 
+function isActionableReview(txn: TransactionWithCategory): boolean {
+  return txn.needsReview && txn.status === "completed" && !txn.isExcluded;
+}
+
 interface TransactionsTableProps {
   transactions: TransactionWithCategory[];
   total: number;
   categories: Category[];
   integrations: Integration[];
+  merchants: string[];
   loading: boolean;
   search: string;
   onSearchChange: (search: string) => void;
+  merchantFilter: string[];
+  onMerchantFilterChange: (merchants: string[]) => void;
   categoryFilter: number[];
   onCategoryFilterChange: (categoryIds: number[]) => void;
   accountFilter: number[];
@@ -100,18 +116,22 @@ interface TransactionsTableProps {
   isFetching?: boolean;
   totals?: TransactionTotals;
   totalsLoading?: boolean;
+  focusId?: number;
 }
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 300;
 
 export function TransactionsTable({
   transactions,
   total,
   categories,
   integrations,
+  merchants,
   loading,
   search,
   onSearchChange,
+  merchantFilter,
+  onMerchantFilterChange,
   categoryFilter,
   onCategoryFilterChange,
   accountFilter,
@@ -124,6 +144,7 @@ export function TransactionsTable({
   isFetching = false,
   totals,
   totalsLoading = false,
+  focusId,
 }: TransactionsTableProps) {
   const t = useTranslations("transactions");
   const tCat = useTranslations("categoriesSeeded");
@@ -131,20 +152,15 @@ export function TransactionsTable({
   const locale = useLocale() as Locale;
   const queryClient = useQueryClient();
   const [updatingId, setUpdatingId] = useState<number | null>(null);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categoryPickerSearch, setCategoryPickerSearch] = useState("");
+  const [merchantSearch, setMerchantSearch] = useState("");
   const totalPages = Math.ceil(total / PAGE_SIZE);
-
-  const selectedTransactions = transactions.filter((txn) =>
-    selectedIds.includes(txn.id),
-  );
-  const allCurrentTransactionsSelected =
-    transactions.length > 0 && selectedTransactions.length === transactions.length;
-  const selectedKind = selectedTransactions[0]?.kind;
-  const canChangeBulkCategory =
-    selectedTransactions.length > 0 &&
-    (selectedKind === "expense" || selectedKind === "income") &&
-    selectedTransactions.every((txn) => txn.kind === selectedKind);
+  useEffect(() => {
+    if (!focusId) return;
+    const row = document.getElementById(`transaction-${focusId}`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusId, transactions]);
 
   const otherKinds: Record<Kind, Array<{ value: Kind; label: string }>> = {
     expense: [
@@ -168,6 +184,7 @@ export function TransactionsTable({
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["summary"] });
       queryClient.invalidateQueries({ queryKey: ["transactions-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["review-queue"] });
     } finally {
       setUpdatingId(null);
     }
@@ -181,6 +198,7 @@ export function TransactionsTable({
       queryClient.invalidateQueries({ queryKey: ["summary"] });
       queryClient.invalidateQueries({ queryKey: ["transactions-summary"] });
       queryClient.invalidateQueries({ queryKey: ["categories"] });
+      queryClient.invalidateQueries({ queryKey: ["review-queue"] });
     } finally {
       setUpdatingId(null);
     }
@@ -193,6 +211,7 @@ export function TransactionsTable({
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["summary"] });
       queryClient.invalidateQueries({ queryKey: ["transactions-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["review-queue"] });
     } finally {
       setUpdatingId(null);
     }
@@ -205,6 +224,7 @@ export function TransactionsTable({
     queryClient.invalidateQueries({ queryKey: ["home"] });
     queryClient.invalidateQueries({ queryKey: ["categories"] });
     queryClient.invalidateQueries({ queryKey: ["excluded-merchants"] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
   };
 
   const handleExcludeToggle = async (
@@ -232,41 +252,34 @@ export function TransactionsTable({
     }
   };
 
-  const handleBulkExclude = async () => {
-    if (selectedIds.length === 0) return;
-    setIsBulkUpdating(true);
+  const handleDeleteManual = async (txn: TransactionWithCategory) => {
+    if (!window.confirm(t("deleteManualConfirm", { description: txn.description }))) {
+      return;
+    }
+    setUpdatingId(txn.id);
     try {
-      await bulkUpdateTransactions({ operation: "exclude", ids: selectedIds });
+      await deleteManualTransaction(txn.id);
       invalidateAfterExclude();
-      toast.success(t("bulkExcludeSuccess", { count: selectedIds.length }));
-      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ["transaction-merchants"] });
+      toast.success(t("deleteManualSuccess"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("bulkUpdateFailed"));
+      toast.error(err instanceof Error ? err.message : t("deleteManualFailed"));
     } finally {
-      setIsBulkUpdating(false);
+      setUpdatingId(null);
     }
   };
 
-  const handleBulkCategoryChange = async (categoryId: number) => {
-    if (!canChangeBulkCategory || selectedIds.length === 0) return;
-    setIsBulkUpdating(true);
+  const handleDeployment = async (txn: TransactionWithCategory, months?: 6 | 12) => {
+    const reversing = !months;
+    if (reversing && !window.confirm(t("reverseDeploymentConfirm"))) return;
+    setUpdatingId(txn.id);
     try {
-      await bulkUpdateTransactions({
-        operation: "change-category",
-        ids: selectedIds,
-        categoryId,
-      });
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["summary"] });
-      queryClient.invalidateQueries({ queryKey: ["transactions-summary"] });
-      queryClient.invalidateQueries({ queryKey: ["categories"] });
-      toast.success(t("bulkCategorySuccess", { count: selectedIds.length }));
-      setSelectedIds([]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("bulkUpdateFailed"));
-    } finally {
-      setIsBulkUpdating(false);
-    }
+      if (months) await deployExpense(txn.id, months); else await reverseExpenseDeployment(txn.id);
+      invalidateAfterExclude();
+      queryClient.invalidateQueries({ queryKey: ["transactions-totals"] });
+      toast.success(reversing ? t("reverseDeploymentSuccess") : t("deploymentSuccess", { months }));
+    } catch (err) { toast.error(err instanceof Error ? err.message : t("deploymentFailed")); }
+    finally { setUpdatingId(null); }
   };
 
   const incomeCategoriesQuery = useQuery({
@@ -284,25 +297,13 @@ export function TransactionsTable({
     return [];
   };
 
-  const bulkCategories = canChangeBulkCategory && selectedKind
-    ? categoriesForKind(selectedKind).filter(
-        (category) =>
-          !categoriesForKind(selectedKind).some(
-            (possibleChild) => possibleChild.parentId === category.id,
-          ),
-      )
-    : [];
-
-  const toggleTransactionSelection = (id: number) => {
-    setSelectedIds((current) =>
-      current.includes(id)
-        ? current.filter((currentId) => currentId !== id)
-        : [...current, id],
+  const filteredCategoryPickerOptions = (rowKind: Kind): Category[] => {
+    const query = categoryPickerSearch.trim().toLocaleLowerCase(locale);
+    return categoriesForKind(rowKind).filter((category) =>
+      translateCategoryName(category.name, tCat)
+        .toLocaleLowerCase(locale)
+        .includes(query),
     );
-  };
-
-  const toggleAllCurrentTransactions = () => {
-    setSelectedIds(allCurrentTransactionsSelected ? [] : transactions.map((txn) => txn.id));
   };
 
   const accountOptions = integrations
@@ -323,7 +324,7 @@ export function TransactionsTable({
 
   const showAccountFilter = accountOptions.length > 1;
 
-  const toggleFilterId = (ids: number[], id: number): number[] =>
+  const toggleFilterId = <T,>(ids: T[], id: T): T[] =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
 
   const accountLabels = accountFilter
@@ -350,12 +351,22 @@ export function TransactionsTable({
     (count) => t("filterSelectedCount", { count })
   );
 
+  const merchantDisplayValue = formatMultiFilterDisplay(
+    merchantFilter,
+    t("filterAny"),
+    (count) => t("filterSelectedCount", { count }),
+  );
+  const filteredMerchants = merchants.filter((merchant) =>
+    merchant.toLocaleLowerCase(locale).includes(merchantSearch.trim().toLocaleLowerCase(locale)),
+  );
+
   const hasActiveFilters =
-    categoryFilter.length > 0 || accountFilter.length > 0;
+    categoryFilter.length > 0 || accountFilter.length > 0 || merchantFilter.length > 0;
 
   const handleClearFilters = () => {
     onCategoryFilterChange([]);
     onAccountFilterChange([]);
+    onMerchantFilterChange([]);
     onPageChange(0);
   };
 
@@ -370,6 +381,16 @@ export function TransactionsTable({
     parentId: number | null,
     depth: number
   ): React.ReactNode[] => {
+    const normalizedSearch = categorySearch.trim().toLocaleLowerCase(locale);
+    const categoryMatchesSearch = (category: Category): boolean => {
+      if (!normalizedSearch) return true;
+      if (translateCategoryName(category.name, tCat).toLocaleLowerCase(locale).includes(normalizedSearch)) {
+        return true;
+      }
+      return categories
+        .filter((child) => child.parentId === category.id)
+        .some(categoryMatchesSearch);
+    };
     const items = categories
       .filter((c) => c.parentId === parentId)
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -377,6 +398,7 @@ export function TransactionsTable({
     for (const cat of items) {
       const hasChildren = categories.some((c) => c.parentId === cat.id);
       const name = translateCategoryName(cat.name, tCat);
+      if (!categoryMatchesSearch(cat)) continue;
       nodes.push(
         <MultiFilterOption
           key={cat.id}
@@ -433,6 +455,31 @@ export function TransactionsTable({
               }}
               className="h-8 w-[200px]"
             />
+            <TransactionMultiFilter
+              label={t("filterMerchant")}
+              icon={Store}
+              displayValue={merchantDisplayValue}
+              triggerClassName="w-[200px]"
+              searchPlaceholder={t("filterMerchantSearch")}
+              searchValue={merchantSearch}
+              onSearchChange={setMerchantSearch}
+              selectAllLabel={t("filterSelectAll")}
+              clearLabel={t("filterClearSelection")}
+              onSelectAll={() => onMerchantFilterChange(merchants)}
+              onClear={() => onMerchantFilterChange([])}
+            >
+              {filteredMerchants.map((merchant) => (
+                <MultiFilterOption
+                  key={merchant}
+                  selected={merchantFilter.includes(merchant)}
+                  onToggle={() =>
+                    onMerchantFilterChange(toggleFilterId(merchantFilter, merchant))
+                  }
+                >
+                  <span className="truncate">{merchant}</span>
+                </MultiFilterOption>
+              ))}
+            </TransactionMultiFilter>
             {showAccountFilter ? (
               <TransactionMultiFilter
                 label={t("filterAccount")}
@@ -474,6 +521,9 @@ export function TransactionsTable({
               label={t("filterCategory")}
               icon={Tags}
               displayValue={categoryDisplayValue}
+              searchPlaceholder={t("filterCategorySearch")}
+              searchValue={categorySearch}
+              onSearchChange={setCategorySearch}
               selectAllLabel={t("filterSelectAll")}
               clearLabel={t("filterClearSelection")}
               onSelectAll={() => onCategoryFilterChange(allCategoryIds)}
@@ -507,61 +557,6 @@ export function TransactionsTable({
             "opacity-60 transition-opacity duration-200"
         )}
       >
-        {selectedTransactions.length > 0 ? (
-          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
-            <span className="me-auto text-sm font-medium">
-              {t("bulkSelected", { count: selectedTransactions.length })}
-            </span>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8"
-              disabled={isBulkUpdating}
-              onClick={handleBulkExclude}
-            >
-              <EyeOff className="me-1.5 h-3.5 w-3.5" />
-              {t("bulkExclude")}
-            </Button>
-            <div title={!canChangeBulkCategory ? t("bulkMixedKinds") : undefined}>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                  disabled={!canChangeBulkCategory || isBulkUpdating}
-                >
-                  <Tags className="me-1.5 h-3.5 w-3.5" />
-                  {t("bulkChangeCategory")}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {bulkCategories.map((category) => (
-                    <DropdownMenuItem
-                      key={category.id}
-                      onClick={() => handleBulkCategoryChange(category.id)}
-                    >
-                      <div
-                        className="me-2 h-2 w-2 rounded-full"
-                        style={{ backgroundColor: category.color }}
-                      />
-                      {translateCategoryName(category.name, tCat)}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2"
-              disabled={isBulkUpdating}
-              onClick={() => setSelectedIds([])}
-              aria-label={t("bulkClearSelection")}
-              title={t("bulkClearSelection")}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        ) : null}
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3, 4, 5].map((i) => (
@@ -570,7 +565,7 @@ export function TransactionsTable({
           </div>
         ) : transactions.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
-            {search || categoryFilter.length > 0 || accountFilter.length > 0
+            {search || categoryFilter.length > 0 || accountFilter.length > 0 || merchantFilter.length > 0
               ? t("emptyWithFilters")
               : t("emptyNoData")}
           </div>
@@ -579,23 +574,7 @@ export function TransactionsTable({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[32px]">
-                    <input
-                      type="checkbox"
-                      checked={allCurrentTransactionsSelected}
-                      ref={(node) => {
-                        if (node) {
-                          node.indeterminate =
-                            selectedTransactions.length > 0 &&
-                            !allCurrentTransactionsSelected;
-                        }
-                      }}
-                      onChange={toggleAllCurrentTransactions}
-                      disabled={isBulkUpdating}
-                      aria-label={t("bulkSelectAll")}
-                      className="h-4 w-4 cursor-pointer accent-foreground"
-                    />
-                  </TableHead>
+                  <TableHead className="w-[32px]" />
                   <SortableTableHead
                     label={t("headerDate")}
                     field="date"
@@ -659,42 +638,24 @@ export function TransactionsTable({
                   const categoryName = txn.categoryName
                     ? translateCategoryName(txn.categoryName, tCat)
                     : t("rowUncategorized");
+                  const locked = txn.deployment !== null;
                   return (
                     <TableRow
                       key={txn.id}
+                      id={`transaction-${txn.id}`}
                       className={cn(
-                        "group transition-colors duration-200 hover:bg-muted/50",
+                        "transition-colors duration-200 hover:bg-muted/50",
                         txn.isExcluded && "opacity-50",
+                        txn.id === focusId && "bg-[color-mix(in_oklch,var(--status-heads-up)_18%,transparent)]",
                       )}
                     >
                       <TableCell>
-                        <div className="relative flex h-4 w-4 items-center justify-center">
-                          <div
-                            className={cn(
-                              "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
-                              selectedIds.includes(txn.id) && "opacity-0",
-                            )}
-                            style={{ color: directionColor }}
-                          >
+                        <div style={{ color: directionColor }}>
                           {isIncome ? (
                             <ArrowUpRight className="h-4 w-4" />
                           ) : (
                             <ArrowDownRight className="h-4 w-4" />
                           )}
-                          </div>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(txn.id)}
-                            onChange={() => toggleTransactionSelection(txn.id)}
-                            disabled={isBulkUpdating}
-                            aria-label={t("bulkSelectTransaction", {
-                              description: txn.description,
-                            })}
-                            className={cn(
-                              "absolute inset-0 h-4 w-4 cursor-pointer accent-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100",
-                              selectedIds.includes(txn.id) && "opacity-100",
-                            )}
-                          />
                         </div>
                       </TableCell>
                       <TableCell className="text-sm tabular-nums text-muted-foreground">
@@ -703,7 +664,7 @@ export function TransactionsTable({
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="font-medium">{txn.description}</div>
-                          {txn.needsReview && (
+                          {isActionableReview(txn) && (
                             <span
                               className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
                               style={{
@@ -726,6 +687,17 @@ export function TransactionsTable({
                               )}
                             </span>
                           )}
+                          {txn.deployment && (
+                            txn.deployment.role === "slice" ? (
+                            <Link href={`/transactions?month=${txn.deployment.originDate.slice(0, 7)}&focus=${txn.deployment.originId}`} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+                              {t("deploymentMonth", { n: txn.deployment.sliceIndex ?? 0, total: txn.deployment.totalMonths })}
+                            </Link>
+                            ) : <span className="text-xs text-muted-foreground">
+                              {txn.deployment.role === "origin"
+                                ? t("deployedAcross", { months: txn.deployment.totalMonths })
+                                : t("deploymentMonth", { n: txn.deployment.sliceIndex ?? 0, total: txn.deployment.totalMonths })}
+                            </span>
+                          )}
                         </div>
                         {txn.memo && (
                           <div className="text-xs text-muted-foreground">
@@ -745,10 +717,11 @@ export function TransactionsTable({
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
+                          <Popover>
+                            <PopoverTrigger
                               className="inline-flex"
-                              disabled={updatingId === txn.id}
+                              disabled={updatingId === txn.id || locked}
+                              onClick={() => setCategoryPickerSearch("")}
                             >
                               <Badge
                                 variant="outline"
@@ -765,25 +738,47 @@ export function TransactionsTable({
                               >
                                 {categoryName}
                               </Badge>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start">
-                              {categoriesForKind(categoryKind).map((cat) => (
-                                <DropdownMenuItem
-                                  key={cat.id}
-                                  onClick={() =>
-                                    handleCategoryChange(txn.id, cat.id)
+                            </PopoverTrigger>
+                            <PopoverContent align="start" className="w-64 p-0">
+                              <div className="border-b border-border p-2">
+                                <Input
+                                  aria-label={t("filterCategorySearch")}
+                                  autoFocus
+                                  className="h-8"
+                                  placeholder={t("filterCategorySearch")}
+                                  value={categoryPickerSearch}
+                                  onChange={(event) =>
+                                    setCategoryPickerSearch(event.target.value)
                                   }
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                />
+                              </div>
+                              {filteredCategoryPickerOptions(categoryKind).map((cat) => (
+                                <button
+                                  type="button"
+                                  key={cat.id}
+                                  className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-start text-sm outline-none hover:bg-accent focus:bg-accent"
+                                  onClick={() => {
+                                    setCategoryPickerSearch("");
+                                    handleCategoryChange(txn.id, cat.id);
+                                  }}
                                 >
                                   <div
                                     className="me-2 h-2 w-2 rounded-full"
                                     style={{ backgroundColor: cat.color }}
                                   />
                                   {translateCategoryName(cat.name, tCat)}
-                                </DropdownMenuItem>
+                                </button>
                               ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          {txn.needsReview && (
+                              {filteredCategoryPickerOptions(categoryKind).length === 0 ? (
+                                <p className="px-2 py-2 text-xs text-muted-foreground">
+                                  {t("noCategorySearchResults")}
+                                </p>
+                              ) : null}
+                            </PopoverContent>
+                          </Popover>
+                          {isActionableReview(txn) && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -825,6 +820,9 @@ export function TransactionsTable({
                             <MoreHorizontal className="h-4 w-4" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            {locked ? (
+                              <DropdownMenuItem onClick={() => handleDeployment(txn)}>{t("reverseDeployment")}</DropdownMenuItem>
+                            ) : <>
                             {otherKinds[txn.kind].map((opt) => (
                               <DropdownMenuItem
                                 key={opt.value}
@@ -856,6 +854,20 @@ export function TransactionsTable({
                                 </DropdownMenuItem>
                               </>
                             )}
+                            {txn.provider === "manual" ? (
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => handleDeleteManual(txn)}
+                              >
+                                <Trash2 className="me-2 h-3.5 w-3.5" />
+                                {t("deleteManualAction")}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {txn.status === "completed" && txn.kind === "expense" && txn.type === "normal" && !txn.isExcluded && txn.source !== "recurring" ? <>
+                              <DropdownMenuItem onClick={() => handleDeployment(txn, 6)}>{t("deployMonths", { months: 6 })}</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleDeployment(txn, 12)}>{t("deployMonths", { months: 12 })}</DropdownMenuItem>
+                            </> : null}
+                            </>}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -876,8 +888,20 @@ export function TransactionsTable({
                       </span>
                     ) : null}
                   </TableCell>
-                  <TableCell className="text-end font-semibold tabular-nums" style={{ color: totals && totals.net >= 0 ? "var(--status-on-track)" : "var(--status-over)" }}>
-                    {totalsLoading ? <Skeleton className="ms-auto h-5 w-24" /> : formatCurrency(totals?.net ?? 0, "ILS", locale)}
+                  <TableCell
+                    className="text-end font-semibold tabular-nums"
+                    style={{
+                      color:
+                        totals && totals.net >= 0
+                          ? "var(--status-on-track)"
+                          : "var(--status-over)",
+                    }}
+                  >
+                    {totalsLoading ? (
+                      <Skeleton className="ms-auto h-5 w-24" />
+                    ) : (
+                      formatCurrency(totals?.net ?? 0, "ILS", locale)
+                    )}
                   </TableCell>
                   <TableCell />
                 </TableRow>
@@ -919,3 +943,4 @@ export function TransactionsTable({
     </Card>
   );
 }
+

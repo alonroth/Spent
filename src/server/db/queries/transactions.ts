@@ -1,19 +1,110 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import { getDb } from "../index";
 import { computeDedupHash } from "../../lib/dedup";
 import { detectKind } from "../../lib/transfers";
 import type {
   TransactionWithCategory,
+  ReviewTransaction,
   MonthlySummary,
   MerchantSummary,
   CategoryBreakdown,
 } from "@/lib/types";
 import {
+  batchSetLowConfidenceReviewReasons,
+  getActiveReviewReasons,
+  resolveAllReviewReasons,
+  ensureInitialRecurringPriceScan,
+} from "./transaction-review-reasons";
+import {
   isTransactionSortField,
   TRANSACTION_SORT_SQL,
 } from "@/lib/transaction-sort";
 export type TransactionKindFilter = "expense" | "income" | "all";
+
+export class DeploymentConflictError extends Error {}
+
+function assertMutableTransaction(workspaceId: number, id: number): void {
+  const member = getDb().prepare(`SELECT 1 FROM transactions
+    WHERE workspace_id = ? AND id = ? AND (is_deployed = 1 OR deployment_id IS NOT NULL)`).get(workspaceId, id);
+  if (member) throw new DeploymentConflictError("reverse the deployment before changing this transaction");
+}
+
+export function isDeploymentMember(workspaceId: number, id: number): boolean {
+  return Boolean(getDb().prepare(`SELECT 1 FROM transactions
+    WHERE workspace_id = ? AND id = ? AND (is_deployed = 1 OR deployment_id IS NOT NULL)`).get(workspaceId, id));
+}
+
+function deploymentDate(originDate: string, index: number): string {
+  const date = new Date(`${originDate.slice(0, 10)}T12:00:00Z`);
+  return `${date.getUTCFullYear() + Math.floor((date.getUTCMonth() + index) / 12)}-${String(((date.getUTCMonth() + index) % 12) + 1).padStart(2, "0")}-01`;
+}
+
+function splitMinorUnits(amount: number, months: number): number[] {
+  const sign = amount < 0 ? -1 : 1;
+  const units = Math.round(Math.abs(amount) * 100);
+  const base = Math.floor(units / months);
+  const remainder = units % months;
+  return Array.from({ length: months }, (_, index) => sign * (base + (index < remainder ? 1 : 0)) / 100);
+}
+
+export interface DeploymentMetadata {
+  deploymentId: number;
+  role: "origin" | "slice";
+  originId: number;
+  originDate: string;
+  sliceIndex: number | null;
+  totalMonths: number;
+}
+
+export function createExpenseDeployment(workspaceId: number, originId: number, months: number): DeploymentMetadata {
+  if (months !== 6 && months !== 12) throw new Error("months must be 6 or 12");
+  const db = getDb();
+  return db.transaction(() => {
+    const origin = db.prepare(`SELECT * FROM transactions WHERE workspace_id = ? AND id = ?`).get(workspaceId, originId) as Record<string, unknown> | undefined;
+    if (!origin) throw new Error("transaction not found");
+    if (origin.is_deployed || origin.deployment_id) throw new DeploymentConflictError("transaction is already deployed");
+    if (origin.status !== "completed" || origin.kind !== "expense" || origin.type !== "normal" || origin.is_excluded || origin.source === "recurring" || Number(origin.charged_amount) >= 0) {
+      throw new DeploymentConflictError("only visible completed normal expenses can be deployed");
+    }
+    const deploymentId = Number(db.prepare(`INSERT INTO expense_deployments (workspace_id, origin_transaction_id, months, origin_date) VALUES (?, ?, ?, ?)`).run(workspaceId, originId, months, String(origin.date).slice(0, 10)).lastInsertRowid);
+    const charged = splitMinorUnits(Number(origin.charged_amount), months);
+    const original = splitMinorUnits(Number(origin.original_amount), months);
+    const insert = db.prepare(`INSERT INTO transactions (
+      workspace_id, account_number, date, processed_date, original_amount, original_currency,
+      charged_amount, charged_currency, description, memo, type, status, identifier,
+      category_id, category_source, ai_confidence, provider, credential_id, sync_run_id,
+      dedup_hash, dedup_sequence, kind, needs_review, is_excluded, source,
+      deployment_id, deployment_index
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', 'completed', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'expense', 0, 0, 'bank', ?, ?)`);
+    for (let index = 0; index < months; index++) {
+      const date = deploymentDate(String(origin.date), index);
+      insert.run(workspaceId, origin.account_number, date, date, original[index], origin.original_currency,
+        charged[index], origin.charged_currency, origin.description, origin.memo,
+        `deployment:${deploymentId}:${index + 1}`, origin.category_id, origin.category_source,
+        origin.ai_confidence, origin.provider, origin.credential_id, origin.sync_run_id,
+        `deployment:${deploymentId}:${index + 1}`, deploymentId, index + 1);
+    }
+    db.prepare("UPDATE transactions SET is_deployed = 1, updated_at = datetime('now') WHERE workspace_id = ? AND id = ?").run(workspaceId, originId);
+    return { deploymentId, role: "origin" as const, originId, originDate: String(origin.date).slice(0, 10), sliceIndex: null, totalMonths: months };
+  })();
+}
+
+export function reverseExpenseDeployment(workspaceId: number, transactionId: number): void {
+  const db = getDb();
+  db.transaction(() => {
+    const row = db.prepare(`SELECT d.id, d.origin_transaction_id AS originId FROM transactions t
+      LEFT JOIN expense_deployments d ON d.id = t.deployment_id
+      WHERE t.workspace_id = ? AND t.id = ?`).get(workspaceId, transactionId) as { id: number | null; originId: number | null } | undefined;
+    const originDeployment = db.prepare("SELECT id, origin_transaction_id AS originId FROM expense_deployments WHERE workspace_id = ? AND origin_transaction_id = ?").get(workspaceId, transactionId) as { id: number; originId: number } | undefined;
+    const deployment = originDeployment ?? (row?.id ? { id: row.id, originId: row.originId! } : undefined);
+    if (!deployment) throw new Error("deployment not found");
+    db.prepare("DELETE FROM transactions WHERE workspace_id = ? AND deployment_id = ?").run(workspaceId, deployment.id);
+    db.prepare("UPDATE transactions SET is_deployed = 0, updated_at = datetime('now') WHERE workspace_id = ? AND id = ?").run(workspaceId, deployment.originId);
+    db.prepare("DELETE FROM expense_deployments WHERE workspace_id = ? AND id = ?").run(workspaceId, deployment.id);
+  })();
+}
 
 interface RawTransaction {
   accountNumber: string;
@@ -35,6 +126,7 @@ interface RawTransaction {
 interface InsertResult {
   added: number;
   updated: number;
+  transactionIds: number[];
 }
 
 export function insertTransactions(
@@ -47,11 +139,15 @@ export function insertTransactions(
   const db = getDb();
   let added = 0;
   let updated = 0;
+  const transactionIds: number[] = [];
 
   const hashCounts = new Map<string, number>();
 
   const existingCountStmt = db.prepare(
     "SELECT COUNT(*) as count FROM transactions WHERE workspace_id = ? AND dedup_hash = ?"
+  );
+  const existingStatusStmt = db.prepare(
+    "SELECT status FROM transactions WHERE workspace_id = ? AND dedup_hash = ? AND dedup_sequence = ?"
   );
 
   const insertStmt = db.prepare(`
@@ -123,10 +219,17 @@ export function insertTransactions(
 
       if (batchCount > existingCount) {
         insertStmt.run(params);
+        const row = db.prepare("SELECT id FROM transactions WHERE workspace_id = ? AND dedup_hash = ? AND dedup_sequence = ?").get(workspaceId, hash, sequence) as { id: number };
+        transactionIds.push(row.id);
         added++;
       } else {
+        const existing = existingStatusStmt.get(workspaceId, hash, sequence) as { status: string } | undefined;
         const result = insertStmt.run(params);
         if (result.changes > 0) {
+          if (existing?.status === "pending" && txn.status === "completed") {
+            const row = db.prepare("SELECT id FROM transactions WHERE workspace_id = ? AND dedup_hash = ? AND dedup_sequence = ?").get(workspaceId, hash, sequence) as { id: number };
+            transactionIds.push(row.id);
+          }
           updated++;
         }
       }
@@ -134,13 +237,101 @@ export function insertTransactions(
   });
 
   batchInsert();
-  return { added, updated };
+  return { added, updated, transactionIds };
+}
+
+export interface ManualTransactionInput {
+  date: string;
+  description: string;
+  amount: number;
+  kind: "expense" | "income";
+  categoryId?: number | null;
+  memo?: string | null;
+}
+
+/** Insert a transaction entered by the user, using the normal ledger shape. */
+export function createManualTransaction(
+  workspaceId: number,
+  input: ManualTransactionInput,
+): { id: number } {
+  const description = input.description.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+    throw new Error("date is required");
+  }
+  if (!description || !Number.isFinite(input.amount) || input.amount <= 0) {
+    throw new Error("description and a positive amount are required");
+  }
+
+  const db = getDb();
+  const categoryId = input.categoryId ?? null;
+  if (categoryId !== null) {
+    const category = db
+      .prepare("SELECT kind, parent_id FROM categories WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, categoryId) as { kind: string; parent_id: number | null } | undefined;
+    const hasChildren = db
+      .prepare("SELECT 1 FROM categories WHERE workspace_id = ? AND parent_id = ? LIMIT 1")
+      .get(workspaceId, categoryId);
+    if (!category || category.kind !== input.kind || hasChildren) {
+      throw new Error("category must be a matching leaf");
+    }
+  }
+
+  const syncRun = db
+    .prepare("SELECT id FROM sync_runs WHERE workspace_id = ? AND provider = 'manual' ORDER BY id LIMIT 1")
+    .get(workspaceId) as { id: number } | undefined;
+  const syncRunId = syncRun?.id ?? Number(
+    db.prepare(
+      "INSERT INTO sync_runs (workspace_id, provider, started_at, completed_at, status, scrape_from_date) VALUES (?, 'manual', datetime('now'), datetime('now'), 'completed', '1970-01-01')",
+    ).run(workspaceId).lastInsertRowid,
+  );
+  const amount = input.kind === "expense" ? -input.amount : input.amount;
+  const dedupHash = computeDedupHash({
+    accountNumber: "Manual",
+    date: input.date,
+    originalAmount: amount,
+    originalCurrency: "ILS",
+    description,
+    identifier: randomUUID(),
+  });
+  const result = db.prepare(`
+    INSERT INTO transactions (
+      workspace_id, account_number, date, processed_date, original_amount, original_currency,
+      charged_amount, charged_currency, description, memo, type, status, category_id,
+      category_source, provider, sync_run_id, dedup_hash, dedup_sequence, kind
+    ) VALUES (?, 'Manual', ?, ?, ?, 'ILS', ?, 'ILS', ?, ?, 'normal', 'completed', ?,
+      ?, 'manual', ?, ?, 0, ?)
+  `).run(
+    workspaceId,
+    input.date,
+    input.date,
+    amount,
+    amount,
+    description,
+    input.memo?.trim() || null,
+    categoryId,
+    categoryId === null ? null : "user",
+    syncRunId,
+    dedupHash,
+    input.kind,
+  );
+  return { id: Number(result.lastInsertRowid) };
+}
+
+export function deleteManualTransaction(workspaceId: number, id: number): void {
+  assertMutableTransaction(workspaceId, id);
+  const result = getDb()
+    .prepare("DELETE FROM transactions WHERE workspace_id = ? AND id = ? AND provider = 'manual'")
+    .run(workspaceId, id);
+  if (result.changes === 0) {
+    throw new Error("manual transaction not found");
+  }
 }
 
 interface QueryParams {
   from?: string;
   to?: string;
   search?: string;
+  merchants?: string[];
   category?: number;
   /**
    * Multi-id filter for parent-category aggregation. Takes precedence over
@@ -163,6 +354,7 @@ export interface TransactionTotalsParams {
   from?: string;
   to?: string;
   search?: string;
+  merchants?: string[];
   categoryIds?: number[];
   kind?: TransactionKindFilter;
   credentialIds?: number[];
@@ -198,11 +390,15 @@ function resolveSortSql(sort: string | undefined): string {
 const TRANSACTION_LIST_FROM = `
   FROM transactions t
   LEFT JOIN categories c ON t.category_id = c.id
-  LEFT JOIN bank_credentials bc ON t.credential_id = bc.id`;
+  LEFT JOIN bank_credentials bc ON t.credential_id = bc.id
+  LEFT JOIN expense_deployments d ON d.workspace_id = t.workspace_id
+    AND (d.id = t.deployment_id OR d.origin_transaction_id = t.id)`;
 
 const TRANSACTION_LIST_SELECT = `
   SELECT t.*, c.name AS category_name, c.color AS category_color,
-         bc.label AS account_label
+         bc.label AS account_label, d.id AS deployment_meta_id,
+         d.origin_transaction_id AS deployment_origin_id, d.origin_date AS deployment_origin_date,
+         d.months AS deployment_months
   ${TRANSACTION_LIST_FROM}`;
 
 export function queryTransactions(
@@ -214,17 +410,22 @@ export function queryTransactions(
   const values: (string | number)[] = [workspaceId];
 
   if (params.from) {
-    conditions.push("t.date >= ?");
+    conditions.push("substr(t.date, 1, 10) >= ?");
     values.push(params.from);
   }
   if (params.to) {
-    conditions.push("t.date <= ?");
+    conditions.push("substr(t.date, 1, 10) <= ?");
     values.push(params.to);
   }
   if (params.search) {
     conditions.push("(t.description LIKE ? OR t.memo LIKE ?)");
     const term = `%${params.search}%`;
     values.push(term, term);
+  }
+  if (params.merchants && params.merchants.length > 0) {
+    const placeholders = params.merchants.map(() => "?").join(",");
+    conditions.push(`t.description IN (${placeholders})`);
+    values.push(...params.merchants);
   }
   if (params.categoryIds && params.categoryIds.length > 0) {
     const placeholders = params.categoryIds.map(() => "?").join(",");
@@ -282,37 +483,123 @@ export function getTransactionTotals(
   workspaceId: number,
   params: TransactionTotalsParams,
 ): TransactionTotals {
+  const db = getDb();
   const conditions: string[] = [
     "t.workspace_id = ?",
     "t.status = 'completed'",
     "t.is_excluded = 0",
+    "t.is_deployed = 0",
   ];
   const values: (string | number)[] = [workspaceId];
-  if (params.from) { conditions.push("substr(t.date, 1, 10) >= ?"); values.push(params.from); }
-  if (params.to) { conditions.push("substr(t.date, 1, 10) <= ?"); values.push(params.to); }
+
+  if (params.from) {
+    conditions.push("substr(t.date, 1, 10) >= ?");
+    values.push(params.from);
+  }
+  if (params.to) {
+    conditions.push("substr(t.date, 1, 10) <= ?");
+    values.push(params.to);
+  }
   if (params.search) {
     conditions.push("(t.description LIKE ? OR t.memo LIKE ?)");
-    const term = `%${params.search}%`; values.push(term, term);
+    const term = `%${params.search}%`;
+    values.push(term, term);
   }
-  if (params.categoryIds?.length) {
-    conditions.push(`t.category_id IN (${params.categoryIds.map(() => "?").join(",")})`);
+  if (params.merchants && params.merchants.length > 0) {
+    const placeholders = params.merchants.map(() => "?").join(",");
+    conditions.push(`t.description IN (${placeholders})`);
+    values.push(...params.merchants);
+  }
+  if (params.categoryIds && params.categoryIds.length > 0) {
+    const placeholders = params.categoryIds.map(() => "?").join(",");
+    conditions.push(`t.category_id IN (${placeholders})`);
     values.push(...params.categoryIds);
   }
   if (params.kind === "income") conditions.push("t.charged_amount > 0");
   if (params.kind === "expense") conditions.push("t.charged_amount < 0");
   appendCredentialIdsFilter(conditions, values, params.credentialIds, "t.");
-  return getDb().prepare(`SELECT
-      COALESCE(SUM(CASE WHEN t.charged_amount > 0 THEN t.charged_amount ELSE 0 END), 0) AS income,
-      COALESCE(SUM(CASE WHEN t.charged_amount < 0 THEN ABS(t.charged_amount) ELSE 0 END), 0) AS expense,
-      COALESCE(SUM(t.charged_amount), 0) AS net,
-      COUNT(*) AS count
-    FROM transactions t WHERE ${conditions.join(" AND ")}`).get(...values) as TransactionTotals;
+
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN t.charged_amount > 0 THEN t.charged_amount ELSE 0 END), 0) AS income,
+         COALESCE(SUM(CASE WHEN t.charged_amount < 0 THEN ABS(t.charged_amount) ELSE 0 END), 0) AS expense,
+         COALESCE(SUM(t.charged_amount), 0) AS net,
+         COUNT(*) AS count
+       FROM transactions t
+       WHERE ${conditions.join(" AND ")}`,
+    )
+    .get(...values) as TransactionTotals;
+
+  return row;
+}
+
+/**
+ * The actionable review queue. Keep its inclusion rules in one place so the
+ * sidebar badge and the review screen can never disagree.
+ */
+export function getReviewTransactions(
+  workspaceId: number,
+): { transactions: ReviewTransaction[]; total: number } {
+  const db = getDb();
+  ensureInitialRecurringPriceScan(workspaceId);
+  const where = `WHERE t.workspace_id = ?
+    AND t.needs_review = 1
+    AND t.status = 'completed'
+    AND t.is_excluded = 0`;
+
+  const countRow = db
+    .prepare(`SELECT COUNT(*) as total FROM transactions t ${where}`)
+    .get(workspaceId) as { total: number };
+
+  const rows = db
+    .prepare(
+      `${TRANSACTION_LIST_SELECT}
+       ${where}
+       ORDER BY substr(t.date, 1, 10) DESC, t.id DESC`,
+    )
+    .all(workspaceId);
+
+  const transactions = rows.map(mapTransactionRow);
+  const reasons = getActiveReviewReasons(workspaceId, transactions.map((transaction) => transaction.id));
+  return {
+    transactions: transactions.map((transaction) => ({ ...transaction, reviewReasons: reasons.get(transaction.id) ?? [] })),
+    total: countRow.total,
+  };
+}
+
+export function getTransactionMerchants(
+  workspaceId: number,
+  params: { from?: string; to?: string; kind?: TransactionKindFilter },
+): string[] {
+  const conditions: string[] = ["workspace_id = ?"];
+  const values: (string | number)[] = [workspaceId];
+  if (params.from) {
+    conditions.push("substr(date, 1, 10) >= ?");
+    values.push(params.from);
+  }
+  if (params.to) {
+    conditions.push("substr(date, 1, 10) <= ?");
+    values.push(params.to);
+  }
+  if (params.kind === "income") conditions.push("charged_amount > 0");
+  if (params.kind === "expense") conditions.push("charged_amount < 0");
+
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT description
+       FROM transactions
+       WHERE ${conditions.join(" AND ")} AND description <> ''
+       ORDER BY description COLLATE NOCASE ASC`,
+    )
+    .all(...values) as { description: string }[];
+  return rows.map((row) => row.description);
 }
 
 export function getUncategorizedTransactionIds(workspaceId: number): number[] {
   const rows = getDb()
     .prepare(
-      "SELECT id FROM transactions WHERE workspace_id = ? AND category_id IS NULL AND kind != 'transfer' AND is_excluded = 0 ORDER BY date DESC"
+      "SELECT id FROM transactions WHERE workspace_id = ? AND category_id IS NULL AND kind != 'transfer' AND status = 'completed' AND is_excluded = 0 ORDER BY date DESC"
     )
     .all(workspaceId) as { id: number }[];
   return rows.map((r) => r.id);
@@ -324,7 +611,7 @@ export function getUncategorizedIdsByKind(
 ): number[] {
   const rows = getDb()
     .prepare(
-      "SELECT id FROM transactions WHERE workspace_id = ? AND category_id IS NULL AND kind = ? AND is_excluded = 0 ORDER BY date DESC"
+      "SELECT id FROM transactions WHERE workspace_id = ? AND category_id IS NULL AND kind = ? AND status = 'completed' AND is_excluded = 0 ORDER BY date DESC"
     )
     .all(workspaceId, kind) as { id: number }[];
   return rows.map((r) => r.id);
@@ -351,6 +638,7 @@ export function updateTransactionCategory(
   categoryId: number,
   source: "ai" | "user"
 ): void {
+  assertMutableTransaction(workspaceId, id);
   getDb()
     .prepare(
       `UPDATE transactions
@@ -393,6 +681,7 @@ export function getMonthlySummary(
          AND status = 'completed'
          AND kind = 'expense'
          AND is_excluded = 0
+         AND is_deployed = 0
        GROUP BY month
        ORDER BY month ASC`
     )
@@ -411,8 +700,9 @@ export function getTopMerchants(
               SUM(ABS(charged_amount)) as amount,
               COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense'
+       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense'
          AND is_excluded = 0
+         AND is_deployed = 0
        GROUP BY description
        ORDER BY amount DESC
        LIMIT ?`
@@ -435,8 +725,9 @@ export function getCategoryBreakdown(
          COUNT(*) as count
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.workspace_id = ? AND t.date >= ? AND t.date <= ? AND t.status = 'completed' AND t.kind = 'expense'
+       WHERE t.workspace_id = ? AND substr(t.date, 1, 10) >= ? AND substr(t.date, 1, 10) <= ? AND t.status = 'completed' AND t.kind = 'expense'
          AND t.is_excluded = 0
+         AND t.is_deployed = 0
        GROUP BY t.category_id
        ORDER BY amount DESC`
     )
@@ -460,8 +751,9 @@ export function getCategorySpendInRange(
               SUM(ABS(charged_amount)) as amount,
               COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
+       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
          AND is_excluded = 0
+         AND is_deployed = 0
        GROUP BY category_id`
     )
     .all(workspaceId, from, to) as CategorySpend[];
@@ -485,8 +777,9 @@ export function getTopMerchantPerCategory(
          SELECT category_id, description, SUM(ABS(charged_amount)) as amount,
                 ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY SUM(ABS(charged_amount)) DESC) as rn
          FROM transactions
-         WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
+         WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
            AND is_excluded = 0
+           AND is_deployed = 0
          GROUP BY category_id, description
        )
        WHERE rn = 1`
@@ -522,6 +815,7 @@ export function getCategorySpendByDay(
          AND t.kind = 'expense'
          AND t.status = 'completed'
          AND t.is_excluded = 0
+         AND t.is_deployed = 0
        GROUP BY days.d
        ORDER BY days.d ASC`
     )
@@ -548,10 +842,11 @@ export function getTopMerchantsForCategory(
               COUNT(*) as count
        FROM transactions
        WHERE workspace_id = ? AND category_id = ?
-         AND date >= ? AND date <= ?
+         AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ?
          AND status = 'completed'
          AND kind = 'expense'
          AND is_excluded = 0
+         AND is_deployed = 0
        GROUP BY description
        ORDER BY amount DESC
        LIMIT ?`
@@ -568,8 +863,9 @@ export function getPeriodTotal(
     .prepare(
       `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total
        FROM transactions
-       WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense'
-         AND is_excluded = 0`
+       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense'
+         AND is_excluded = 0
+         AND is_deployed = 0`
     )
     .get(workspaceId, from, to) as { total: number };
   return row.total;
@@ -584,7 +880,7 @@ export function getPeriodCount(
     .prepare(
       `SELECT COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense'
+       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense'
          AND is_excluded = 0`
     )
     .get(workspaceId, from, to) as { count: number };
@@ -613,6 +909,15 @@ interface TransactionRow {
   provider: string;
   credential_id: number | null;
   sync_run_id: number;
+  source: string;
+  deployment_id: number | null;
+  deployment_index: number | null;
+  is_deployed: number;
+  deployment_meta_id?: number | null;
+  deployment_origin_id?: number | null;
+  deployment_origin_date?: string | null;
+  deployment_months?: number | null;
+  recurring_transaction_id: number | null;
   kind: string;
   needs_review: number;
   is_excluded: number;
@@ -647,7 +952,9 @@ function mapTransactionRow(row: unknown): TransactionWithCategory {
     provider: r.provider,
     credentialId: r.credential_id ?? null,
     accountLabel: r.account_label ?? null,
-    syncRunId: r.sync_run_id,
+    syncRunId: r.sync_run_id ?? null,
+    source: r.deployment_id != null ? "deployment" : (r.source ?? "bank") as "bank" | "recurring" | "deployment",
+    recurringTransactionId: r.recurring_transaction_id ?? null,
     kind: r.kind as "expense" | "income" | "transfer",
     needsReview: r.needs_review === 1,
     isExcluded: r.is_excluded === 1,
@@ -655,6 +962,14 @@ function mapTransactionRow(row: unknown): TransactionWithCategory {
     updatedAt: r.updated_at,
     categoryName: r.category_name ?? null,
     categoryColor: r.category_color ?? null,
+    deployment: r.deployment_meta_id != null ? {
+      deploymentId: r.deployment_meta_id,
+      role: r.is_deployed === 1 ? "origin" : "slice",
+      originId: r.deployment_origin_id!,
+      originDate: r.deployment_origin_date!,
+      sliceIndex: r.deployment_index,
+      totalMonths: r.deployment_months!,
+    } : null,
   };
 }
 
@@ -663,6 +978,7 @@ export function setTransactionKind(
   id: number,
   kind: "expense" | "income" | "transfer"
 ): void {
+  assertMutableTransaction(workspaceId, id);
   getDb()
     .prepare(
       `UPDATE transactions
@@ -677,13 +993,11 @@ export function setTransactionNeedsReview(
   id: number,
   value: boolean
 ): void {
-  getDb()
-    .prepare(
-      `UPDATE transactions
-       SET needs_review = ?, updated_at = datetime('now')
-       WHERE workspace_id = ? AND id = ?`
-    )
-    .run(value ? 1 : 0, workspaceId, id);
+  if (value) {
+    batchSetLowConfidenceReviewReasons(workspaceId, [{ id, active: true }]);
+  } else {
+    resolveAllReviewReasons(workspaceId, id);
+  }
 }
 
 interface TransactionContext {
@@ -714,17 +1028,7 @@ export function batchSetNeedsReview(
   updates: { id: number; needsReview: boolean }[]
 ): void {
   if (updates.length === 0) return;
-  const db = getDb();
-  const stmt = db.prepare(
-    `UPDATE transactions
-     SET needs_review = ?, updated_at = datetime('now')
-     WHERE workspace_id = ? AND id = ?`
-  );
-  db.transaction(() => {
-    for (const { id, needsReview } of updates) {
-      stmt.run(needsReview ? 1 : 0, workspaceId, id);
-    }
-  })();
+  batchSetLowConfidenceReviewReasons(workspaceId, updates.map(({ id, needsReview }) => ({ id, active: needsReview })));
 }
 
 export interface NeedsReviewCount {
@@ -763,10 +1067,11 @@ export function getTransactionsSummary(
   const db = getDb();
   const baseConditions = [
     "workspace_id = ?",
-    "date >= ?",
-    "date <= ?",
+    "substr(date, 1, 10) >= ?",
+    "substr(date, 1, 10) <= ?",
     "status = 'completed'",
     "is_excluded = 0",
+    "is_deployed = 0",
   ];
   const baseValues: (string | number)[] = [workspaceId, from, to];
   const summaryCredentialIds =
@@ -798,10 +1103,11 @@ export function getTransactionsSummary(
     const cmp = sign === "income" ? "> 0" : "< 0";
     const tConditions = [
       "t.workspace_id = ?",
-      "t.date >= ?",
-      "t.date <= ?",
+      "substr(t.date, 1, 10) >= ?",
+      "substr(t.date, 1, 10) <= ?",
       "t.status = 'completed'",
       "t.is_excluded = 0",
+      "t.is_deployed = 0",
       `t.charged_amount ${cmp}`,
     ];
     const tValues: (string | number)[] = [workspaceId, from, to];
@@ -864,7 +1170,7 @@ export function getNeedsReviewCountByCategory(
     .prepare(
       `SELECT category_id as categoryId, COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND date >= ? AND date <= ?
+       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ?
          AND status = 'completed'
          AND kind = 'expense'
          AND needs_review = 1
@@ -873,3 +1179,4 @@ export function getNeedsReviewCountByCategory(
     )
     .all(workspaceId, from, to) as NeedsReviewCount[];
 }
+

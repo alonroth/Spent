@@ -11,6 +11,11 @@ import type {
   Workspace,
   HomePayload,
   ActivitySnapshot,
+  ExpenseType,
+  AnnualTablePayload,
+  RecurringTransaction,
+  AnnualTableOrder,
+  ReviewTransaction,
 } from "./types";
 import { getActiveWorkspaceIdSync } from "./workspace-store";
 
@@ -24,6 +29,19 @@ function withWorkspaceHeader(init?: RequestInit): RequestInit {
   }
   return { ...init, headers };
 }
+
+export function getAnnualTable(year: number) { return fetchJSON<AnnualTablePayload>(`/api/table?year=${year}`); }
+export function updateAnnualTableOrder(section: "mandatory" | "optional", order: string[]) {
+  return fetchJSON<AnnualTableOrder>("/api/table/order", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ section, order }),
+  });
+}
+export function getRecurringTransactions() { return fetchJSON<RecurringTransaction[]>("/api/recurring-transactions"); }
+export function createRecurringTransaction(input: Omit<RecurringTransaction, "id" | "active" | "createdAt" | "updatedAt"> & { active?: boolean }) { return fetchJSON<RecurringTransaction>("/api/recurring-transactions", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)}); }
+export function updateRecurringTransaction(id:number,input: Omit<RecurringTransaction, "id" | "active" | "createdAt" | "updatedAt"> & { active?: boolean }) { return fetchJSON<RecurringTransaction>(`/api/recurring-transactions/${id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)}); }
+export function deleteRecurringTransaction(id:number) { return fetchJSON<{success:boolean}>(`/api/recurring-transactions/${id}`, {method:"DELETE"}); }
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, withWorkspaceHeader(init));
@@ -133,10 +151,11 @@ export function testBankConnection(
 }
 
 export function saveAIConfig(config: {
-  provider: "claude" | "ollama" | "none";
+  provider: "claude" | "gemini" | "ollama" | "none";
   apiKey?: string;
   ollamaUrl?: string;
   ollamaModel?: string;
+  geminiModel?: "gemini-3.7-flash" | "gemini-3.5-flash-lite";
 }) {
   return fetchJSON<{ success: boolean }>("/api/setup/ai", {
     method: "POST",
@@ -149,7 +168,13 @@ export function getSettings() {
   return fetchJSON<AppSettings>("/api/settings");
 }
 
-export function updateSettings(settings: Partial<AppSettings>) {
+export function updateSettings(
+  settings: Partial<AppSettings> & {
+    remoteAccessEnabled?: boolean;
+    remoteAccessPassword?: string;
+    remoteAccessPasswordConfirmation?: string;
+  }
+) {
   return fetchJSON<AppSettings>("/api/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -195,6 +220,7 @@ export function getTransactions(params: {
   from?: string;
   to?: string;
   search?: string;
+  merchants?: string[];
   category?: number;
   categoryIds?: number[];
   sort?: string;
@@ -209,7 +235,7 @@ export function getTransactions(params: {
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined) return;
     if (
-      (key === "categoryIds" || key === "credentialIds") &&
+      (key === "categoryIds" || key === "credentialIds" || key === "merchants") &&
       Array.isArray(value)
     ) {
       for (const id of value) searchParams.append(key, String(id));
@@ -229,10 +255,18 @@ export interface TransactionTotals {
   count: number;
 }
 
+export function deployExpense(id: number, months: 6 | 12) {
+  return fetchJSON(`/api/transactions/${id}/deployment`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ months }) });
+}
+export function reverseExpenseDeployment(id: number) {
+  return fetchJSON<{ success: boolean }>(`/api/transactions/${id}/deployment`, { method: "DELETE" });
+}
+
 export function getTransactionTotals(params: {
   from?: string;
   to?: string;
   search?: string;
+  merchants?: string[];
   categoryIds?: number[];
   kind?: TransactionKindFilter;
   credentialIds?: number[];
@@ -240,10 +274,51 @@ export function getTransactionTotals(params: {
   const searchParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined) return;
-    if (Array.isArray(value)) value.forEach((item) => searchParams.append(key, String(item)));
-    else searchParams.set(key, String(value));
+    if (Array.isArray(value)) {
+      for (const item of value) searchParams.append(key, String(item));
+      return;
+    }
+    searchParams.set(key, String(value));
   });
   return fetchJSON<TransactionTotals>(`/api/transactions/totals?${searchParams}`);
+}
+
+export interface ReviewQueue {
+  transactions: ReviewTransaction[];
+  total: number;
+}
+
+export const reviewQueueQueryKey = ["review-queue"] as const;
+
+export function getReviewQueue() {
+  return fetchJSON<ReviewQueue>("/api/review");
+}
+
+export function getTransactionMerchants(params: {
+  from?: string;
+  to?: string;
+  kind?: TransactionKindFilter;
+}) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) searchParams.set(key, String(value));
+  });
+  return fetchJSON<string[]>(`/api/transactions/merchants?${searchParams}`);
+}
+
+export function createManualTransaction(input: {
+  date: string;
+  description: string;
+  amount: number;
+  kind: "expense" | "income";
+  categoryId?: number | null;
+  memo?: string;
+}) {
+  return fetchJSON<{ id: number }>("/api/transactions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export function setTransactionKind(id: number, kind: TransactionKind) {
@@ -251,6 +326,12 @@ export function setTransactionKind(id: number, kind: TransactionKind) {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind }),
+  });
+}
+
+export function deleteManualTransaction(id: number) {
+  return fetchJSON<{ success: boolean }>(`/api/transactions/${id}`, {
+    method: "DELETE",
   });
 }
 
@@ -272,21 +353,6 @@ export function setTransactionExcluded(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ excluded, alwaysForMerchant }),
   });
-}
-
-export type BulkTransactionOperation =
-  | { operation: "exclude"; ids: number[] }
-  | { operation: "change-category"; ids: number[]; categoryId: number };
-
-export function bulkUpdateTransactions(operation: BulkTransactionOperation) {
-  return fetchJSON<{ success: boolean; updated: number }>(
-    "/api/transactions/bulk",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(operation),
-    },
-  );
 }
 
 export interface ExcludedMerchantRule {
@@ -417,6 +483,12 @@ export function updateCategoryBudgetMode(
   });
 }
 
+export function updateCategoryExpenseType(categoryId: number, expenseType: ExpenseType) {
+  return fetchJSON<{ success: boolean }>(`/api/categories/${categoryId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expenseType }),
+  });
+}
+
 export function updateCategoryDescription(
   categoryId: number,
   description: string | null
@@ -484,6 +556,7 @@ export function deleteIntegration(credentialId: number) {
 
 export function getIntegrationCredentials(credentialId: number) {
   return fetchJSON<{
+    /** Saved credential values are write-only; edit responses return {}. */
     credentials: Record<string, string> | null;
     label: string | null;
     provider: string | null;
@@ -714,3 +787,4 @@ export function pullOllamaModel(
 
   return { cancel: () => controller.abort() };
 }
+

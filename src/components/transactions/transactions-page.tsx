@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { PageHeader } from "@/components/layout/app-shell";
 import { TransactionsTable } from "@/components/dashboard/transactions-table";
-import { PeriodSelector } from "@/components/dashboard/period-selector";
+import { TransactionsPeriodSelector } from "./transactions-period-selector";
 import { AINotConnectedBanner } from "@/components/ai-not-connected-banner";
 import { KpiCards } from "./kpi-cards";
 import { WidgetsRow } from "./widgets-row";
@@ -13,6 +14,7 @@ import {
   getCategories,
   getTransactions,
   getTransactionTotals,
+  getTransactionMerchants,
   getTransactionsSummary,
   listIntegrations,
 } from "@/lib/api";
@@ -25,16 +27,53 @@ import {
 } from "@/lib/transaction-sort";
 import {
   addMonths,
+  formatMonth,
   formatMonthLabel,
   getMonthRange,
 } from "@/lib/formatters";
 import type { Locale } from "@/i18n/routing";
+import { ManualTransactionDialog } from "./manual-transaction-dialog";
+
+function monthDate(value: string): Date {
+  return new Date(
+    Number(value.slice(0, 4)),
+    Number(value.slice(5, 7)) - 1,
+    1,
+  );
+}
+
+function monthValue(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftRange(from: string, to: string, amount: number) {
+  const start = addMonths(monthDate(from), amount);
+  const end = addMonths(monthDate(to), amount);
+  return {
+    from: getMonthRange(start).from,
+    to: getMonthRange(end).to,
+  };
+}
 
 export function TransactionsPage() {
   const t = useTranslations("transactions");
   const locale = useLocale() as Locale;
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const searchParams = useSearchParams();
+  const requestedMonth = searchParams.get("month");
+  const focusId = Number(searchParams.get("focus")) || undefined;
+  const [period, setPeriod] = useState<
+    | { mode: "month"; month: string }
+    | { mode: "range"; from: string; to: string }
+  >(() => {
+    const now = new Date();
+    const month = requestedMonth && /^\d{4}-\d{2}$/.test(requestedMonth) ? requestedMonth : undefined;
+    return {
+      mode: "month",
+      month: month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+    };
+  });
   const [search, setSearch] = useState("");
+  const [merchantFilter, setMerchantFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<number[]>([]);
   const [accountFilter, setAccountFilter] = useState<number[]>([]);
   const [page, setPage] = useState(0);
@@ -48,7 +87,10 @@ export function TransactionsPage() {
     { value: "expense", label: t("filterExpenses") },
   ];
 
-  const { from, to } = getMonthRange(selectedDate);
+  const selectedDate = period.mode === "month" ? monthDate(period.month) : monthDate(period.from);
+  const monthRange = getMonthRange(selectedDate);
+  const from = period.mode === "month" ? monthRange.from : period.from;
+  const to = period.mode === "month" ? monthRange.to : period.to;
 
   const allCategoriesQuery = useQuery({
     queryKey: ["categories"],
@@ -64,12 +106,18 @@ export function TransactionsPage() {
     allCategoriesQuery.data ?? []
   );
 
+  const merchantsQuery = useQuery({
+    queryKey: ["transaction-merchants", from, to, kind],
+    queryFn: () => getTransactionMerchants({ from, to, kind }),
+  });
+
   const transactionsQuery = useQuery({
     queryKey: [
       "transactions",
       from,
       to,
       search,
+      merchantFilter,
       categoryFilter,
       accountFilter,
       page,
@@ -82,6 +130,7 @@ export function TransactionsPage() {
         from,
         to,
         search: search || undefined,
+        merchants: merchantFilter.length > 0 ? merchantFilter : undefined,
         categoryIds: expandedCategoryIds,
         credentialIds:
           accountFilter.length > 0 ? accountFilter : undefined,
@@ -95,15 +144,26 @@ export function TransactionsPage() {
   });
 
   const totalsQuery = useQuery({
-    queryKey: ["transactions-totals", from, to, search, expandedCategoryIds, accountFilter, kind],
-    queryFn: () => getTransactionTotals({
+    queryKey: [
+      "transactions-totals",
       from,
       to,
-      search: search || undefined,
-      categoryIds: expandedCategoryIds,
-      credentialIds: accountFilter.length ? accountFilter : undefined,
+      search,
+      merchantFilter,
+      expandedCategoryIds,
+      accountFilter,
       kind,
-    }),
+    ],
+    queryFn: () =>
+      getTransactionTotals({
+        from,
+        to,
+        search: search || undefined,
+        merchants: merchantFilter.length > 0 ? merchantFilter : undefined,
+        categoryIds: expandedCategoryIds,
+        credentialIds: accountFilter.length > 0 ? accountFilter : undefined,
+        kind,
+      }),
     placeholderData: keepPreviousData,
   });
 
@@ -118,7 +178,9 @@ export function TransactionsPage() {
       kind === "income" ? getCategories("income") : getCategories("expense"),
   });
 
-  const monthLabel = formatMonthLabel(selectedDate, locale);
+  const periodLabel = period.mode === "month"
+    ? formatMonthLabel(selectedDate, locale)
+    : `${formatMonth(period.from, locale)} – ${formatMonth(period.to, locale)}`;
 
   const summaryInitialLoading =
     summaryQuery.isPending && summaryQuery.data === undefined;
@@ -129,13 +191,42 @@ export function TransactionsPage() {
     <>
       <PageHeader
         title={t("pageTitle")}
-        meta={monthLabel}
+        meta={periodLabel}
         actions={
-          <PeriodSelector
-            label={monthLabel}
-            onPrev={() => setSelectedDate((d) => addMonths(d, -1))}
-            onNext={() => setSelectedDate((d) => addMonths(d, 1))}
-          />
+          <div className="flex items-center gap-2">
+            <TransactionsPeriodSelector
+              mode={period.mode}
+              month={period.mode === "month" ? period.month : period.from.slice(0, 7)}
+              from={from}
+              to={to}
+              label={periodLabel}
+              onPrev={() => {
+                if (period.mode === "month") {
+                  const date = addMonths(selectedDate, -1);
+                  setPeriod({ mode: "month", month: monthValue(date) });
+                } else {
+                  const shifted = shiftRange(period.from, period.to, -1);
+                  setPeriod({ mode: "range", ...shifted });
+                }
+              }}
+              onNext={() => {
+                if (period.mode === "month") {
+                  const date = addMonths(selectedDate, 1);
+                  setPeriod({ mode: "month", month: monthValue(date) });
+                } else {
+                  const shifted = shiftRange(period.from, period.to, 1);
+                  setPeriod({ mode: "range", ...shifted });
+                }
+              }}
+              onMonthChange={(month) => setPeriod({ mode: "month", month })}
+              onRangeApply={(rangeFrom, rangeTo) => setPeriod({ mode: "range", from: `${rangeFrom}-01`, to: getMonthRange(new Date(Number(rangeTo.slice(0, 4)), Number(rangeTo.slice(5, 7)), 0)).to })}
+              onReset={() => {
+                const now = new Date();
+                setPeriod({ mode: "month", month: monthValue(now) });
+              }}
+            />
+            <ManualTransactionDialog />
+          </div>
         }
       />
 
@@ -159,6 +250,7 @@ export function TransactionsPage() {
                   setKind(opt.value);
                   setPage(0);
                   setCategoryFilter([]);
+                  setMerchantFilter([]);
                 }}
                 className={
                   active
@@ -174,11 +266,12 @@ export function TransactionsPage() {
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <TransactionsTable
-            key={[from, to, search, categoryFilter.join(","), accountFilter.join(","), page, kind, sortField, sortOrder].join("|")}
+            focusId={focusId}
             transactions={transactionsQuery.data?.transactions ?? []}
             total={transactionsQuery.data?.total ?? 0}
             categories={categoriesQuery.data ?? []}
             integrations={integrationsQuery.data ?? []}
+            merchants={merchantsQuery.data ?? []}
             loading={tableInitialLoading}
             isFetching={transactionsQuery.isFetching}
             totals={totalsQuery.data}
@@ -193,6 +286,11 @@ export function TransactionsPage() {
             }}
             search={search}
             onSearchChange={setSearch}
+            merchantFilter={merchantFilter}
+            onMerchantFilterChange={(merchants) => {
+              setMerchantFilter(merchants);
+              setPage(0);
+            }}
             categoryFilter={categoryFilter}
             onCategoryFilterChange={(ids) => {
               setCategoryFilter(ids);
@@ -211,3 +309,4 @@ export function TransactionsPage() {
     </>
   );
 }
+
