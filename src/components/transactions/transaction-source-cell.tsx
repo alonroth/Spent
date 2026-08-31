@@ -29,6 +29,9 @@ export function TransactionSourceCell({
   accountLabel,
 }: TransactionSourceCellProps) {
   const tBanks = useTranslations("banks");
+  if (provider === "recurring" || provider === "manual") {
+    return <div className="flex min-w-0 items-center gap-2"><div className="h-5 w-5 shrink-0 rounded-md bg-primary/15" /><div className="text-sm leading-tight">{provider === "manual" ? "Manual" : "Recurring"}</div></div>;
+  }
   const info = BANK_PROVIDERS.find((b) => b.id === provider);
   const providerName = translateProviderName(
     provider,
@@ -61,3 +64,4 @@ export function TransactionSourceCell({
     </div>
   );
 }
+

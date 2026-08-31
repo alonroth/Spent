@@ -4,7 +4,7 @@ import { getDb } from "../index";
 import type { Category, CategoryKind } from "@/lib/types";
 
 const CATEGORY_COLUMNS =
-  "id, parent_id as parentId, name, color, icon, kind, budget_mode as budgetMode, description";
+  "id, parent_id as parentId, name, color, icon, kind, expense_type as expenseType, budget_mode as budgetMode, description";
 
 export function getAllCategories(
   workspaceId: number,
@@ -133,6 +133,19 @@ export function updateCategoryBudgetMode(
   return result.changes > 0;
 }
 
+export function updateCategoryExpenseType(
+  workspaceId: number,
+  id: number,
+  expenseType: "mandatory" | "optional"
+): boolean {
+  const result = getDb().prepare(
+    `UPDATE categories SET expense_type = ?
+     WHERE workspace_id = ? AND id = ? AND kind = 'expense'
+       AND id NOT IN (SELECT parent_id FROM categories WHERE parent_id IS NOT NULL)`
+  ).run(expenseType, workspaceId, id);
+  return result.changes > 0;
+}
+
 export function setBudgetModesBulk(
   workspaceId: number,
   budgetedIds: number[]
@@ -242,6 +255,7 @@ export function createParentCategory(
     color,
     icon,
     kind: input.kind,
+    expenseType: null,
     budgetMode: "budgeted",
     description,
   };
@@ -333,9 +347,9 @@ export function ensureCategory(
   const color = pickColor(trimmed.toLowerCase());
   const result = getDb()
     .prepare(
-      "INSERT INTO categories (workspace_id, parent_id, name, color, icon, kind) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO categories (workspace_id, parent_id, name, color, icon, kind, expense_type) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
-    .run(workspaceId, parentId, trimmed, color, icon, kind);
+    .run(workspaceId, parentId, trimmed, color, icon, kind, kind === "expense" ? "optional" : null);
 
   return {
     id: Number(result.lastInsertRowid),
@@ -344,6 +358,7 @@ export function ensureCategory(
     color,
     icon,
     kind,
+    expenseType: kind === "expense" ? "optional" : null,
     budgetMode: "budgeted",
     description: null,
   };
@@ -389,6 +404,10 @@ export function deleteCategory(
   if (children.length > 0) {
     return { ok: false, reason: "has-children", children };
   }
+  const recurring = db.prepare("SELECT 1 FROM recurring_transactions WHERE workspace_id = ? AND category_id = ? LIMIT 1").get(workspaceId, categoryId);
+  if (recurring) {
+    return { ok: false, reason: "has-children" };
+  }
 
   const txnCountRow = db
     .prepare(
@@ -421,3 +440,4 @@ export function deleteCategory(
     unassignedTransactionCount: txnCountRow.count,
   };
 }
+

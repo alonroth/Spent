@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import {
+  deleteManualTransaction,
   updateTransactionCategory,
   setTransactionKind,
   getTransactionContext,
+  DeploymentConflictError,
+  isDeploymentMember,
 } from "@/server/db/queries/transactions";
 import { resolveAllReviewReasons } from "@/server/db/queries/transaction-review-reasons";
 import { recordMerchantCategory } from "@/server/lib/merchant-memory";
@@ -28,7 +31,10 @@ export async function PUT(
   const numericId = Number(id);
 
   const before = getTransactionContext(workspaceId, numericId);
-  updateTransactionCategory(workspaceId, numericId, body.categoryId, "user");
+  try { updateTransactionCategory(workspaceId, numericId, body.categoryId, "user"); } catch (error) {
+    if (error instanceof DeploymentConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
   resolveAllReviewReasons(workspaceId, numericId);
 
   if (before && (before.kind === "expense" || before.kind === "income")) {
@@ -65,6 +71,29 @@ export async function PUT(
   return NextResponse.json({ success: true });
 }
 
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const workspaceId = getWorkspaceIdFromRequest(request);
+  const { id } = await params;
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return NextResponse.json({ error: "invalid transaction id" }, { status: 400 });
+  }
+
+  try {
+    deleteManualTransaction(workspaceId, numericId);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof DeploymentConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "transaction not found" },
+      { status: 404 },
+    );
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -83,6 +112,7 @@ export async function PATCH(
     if (!ctx) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
+    if (isDeploymentMember(workspaceId, numericId)) return NextResponse.json({ error: "reverse the deployment before changing this transaction" }, { status: 409 });
     resolveAllReviewReasons(workspaceId, numericId);
     if (
       ctx.categoryId != null &&
@@ -118,7 +148,11 @@ export async function PATCH(
     );
   }
 
-  setTransactionKind(workspaceId, numericId, body.kind);
+  try { setTransactionKind(workspaceId, numericId, body.kind); } catch (error) {
+    if (error instanceof DeploymentConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
 
   return NextResponse.json({ success: true });
 }
+

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  createManualTransaction,
   queryTransactions,
   type TransactionKindFilter,
 } from "@/server/db/queries/transactions";
@@ -27,13 +28,14 @@ export async function GET(request: Request) {
     .getAll("credentialIds")
     .map((v) => Number(v))
     .filter((n) => Number.isFinite(n) && n > 0);
+
   const merchants = searchParams.getAll("merchants").filter(Boolean);
 
   const result = queryTransactions(workspaceId, {
     from: searchParams.get("from") ?? undefined,
     to: searchParams.get("to") ?? undefined,
     search: searchParams.get("search") ?? undefined,
-    merchants: merchants.length ? merchants : undefined,
+    merchants: merchants.length > 0 ? merchants : undefined,
     category: searchParams.has("category")
       ? Number(searchParams.get("category"))
       : undefined,
@@ -53,3 +55,25 @@ export async function GET(request: Request) {
 
   return NextResponse.json(result);
 }
+
+export async function POST(request: Request) {
+  const workspaceId = getWorkspaceIdFromRequest(request);
+  try {
+    const body = await request.json();
+    const result = createManualTransaction(workspaceId, {
+      date: body.date,
+      description: body.description,
+      amount: Number(body.amount),
+      kind: body.kind,
+      categoryId: body.categoryId == null || body.categoryId === "" ? null : Number(body.categoryId),
+      memo: body.memo,
+    });
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "invalid transaction" },
+      { status: 400 },
+    );
+  }
+}
+
