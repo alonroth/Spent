@@ -250,6 +250,21 @@ export function setTransactionExcluded(
   });
 }
 
+export type BulkTransactionOperation =
+  | { operation: "exclude"; ids: number[] }
+  | { operation: "change-category"; ids: number[]; categoryId: number };
+
+export function bulkUpdateTransactions(operation: BulkTransactionOperation) {
+  return fetchJSON<{ success: boolean; updated: number }>(
+    "/api/transactions/bulk",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(operation),
+    },
+  );
+}
+
 export interface ExcludedMerchantRule {
   id: number;
   provider: string;

@@ -37,6 +37,7 @@ import {
   Tags,
   EyeOff,
   Eye,
+  X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -46,6 +47,7 @@ import {
   approveTransactionCategory,
   getCategories,
   setTransactionExcluded,
+  bulkUpdateTransactions,
 } from "@/lib/api";
 import { toast } from "sonner";
 import { translateCategoryName, translateProviderName } from "@/lib/i18n-data";
@@ -124,7 +126,20 @@ export function TransactionsTable({
   const locale = useLocale() as Locale;
   const queryClient = useQueryClient();
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const selectedTransactions = transactions.filter((txn) =>
+    selectedIds.includes(txn.id),
+  );
+  const allCurrentTransactionsSelected =
+    transactions.length > 0 && selectedTransactions.length === transactions.length;
+  const selectedKind = selectedTransactions[0]?.kind;
+  const canChangeBulkCategory =
+    selectedTransactions.length > 0 &&
+    (selectedKind === "expense" || selectedKind === "income") &&
+    selectedTransactions.every((txn) => txn.kind === selectedKind);
 
   const otherKinds: Record<Kind, Array<{ value: Kind; label: string }>> = {
     expense: [
@@ -212,6 +227,43 @@ export function TransactionsTable({
     }
   };
 
+  const handleBulkExclude = async () => {
+    if (selectedIds.length === 0) return;
+    setIsBulkUpdating(true);
+    try {
+      await bulkUpdateTransactions({ operation: "exclude", ids: selectedIds });
+      invalidateAfterExclude();
+      toast.success(t("bulkExcludeSuccess", { count: selectedIds.length }));
+      setSelectedIds([]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("bulkUpdateFailed"));
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkCategoryChange = async (categoryId: number) => {
+    if (!canChangeBulkCategory || selectedIds.length === 0) return;
+    setIsBulkUpdating(true);
+    try {
+      await bulkUpdateTransactions({
+        operation: "change-category",
+        ids: selectedIds,
+        categoryId,
+      });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["summary"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+      toast.success(t("bulkCategorySuccess", { count: selectedIds.length }));
+      setSelectedIds([]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("bulkUpdateFailed"));
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
   const incomeCategoriesQuery = useQuery({
     queryKey: ["categories", "income"],
     queryFn: () => getCategories("income"),
@@ -225,6 +277,27 @@ export function TransactionsTable({
     if (rowKind === "income") return incomeCategoriesQuery.data ?? [];
     if (rowKind === "expense") return expenseCategoriesQuery.data ?? [];
     return [];
+  };
+
+  const bulkCategories = canChangeBulkCategory && selectedKind
+    ? categoriesForKind(selectedKind).filter(
+        (category) =>
+          !categoriesForKind(selectedKind).some(
+            (possibleChild) => possibleChild.parentId === category.id,
+          ),
+      )
+    : [];
+
+  const toggleTransactionSelection = (id: number) => {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((currentId) => currentId !== id)
+        : [...current, id],
+    );
+  };
+
+  const toggleAllCurrentTransactions = () => {
+    setSelectedIds(allCurrentTransactionsSelected ? [] : transactions.map((txn) => txn.id));
   };
 
   const accountOptions = integrations
@@ -429,6 +502,61 @@ export function TransactionsTable({
             "opacity-60 transition-opacity duration-200"
         )}
       >
+        {selectedTransactions.length > 0 ? (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+            <span className="me-auto text-sm font-medium">
+              {t("bulkSelected", { count: selectedTransactions.length })}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8"
+              disabled={isBulkUpdating}
+              onClick={handleBulkExclude}
+            >
+              <EyeOff className="me-1.5 h-3.5 w-3.5" />
+              {t("bulkExclude")}
+            </Button>
+            <div title={!canChangeBulkCategory ? t("bulkMixedKinds") : undefined}>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                  disabled={!canChangeBulkCategory || isBulkUpdating}
+                >
+                  <Tags className="me-1.5 h-3.5 w-3.5" />
+                  {t("bulkChangeCategory")}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {bulkCategories.map((category) => (
+                    <DropdownMenuItem
+                      key={category.id}
+                      onClick={() => handleBulkCategoryChange(category.id)}
+                    >
+                      <div
+                        className="me-2 h-2 w-2 rounded-full"
+                        style={{ backgroundColor: category.color }}
+                      />
+                      {translateCategoryName(category.name, tCat)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              disabled={isBulkUpdating}
+              onClick={() => setSelectedIds([])}
+              aria-label={t("bulkClearSelection")}
+              title={t("bulkClearSelection")}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : null}
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3, 4, 5].map((i) => (
@@ -446,7 +574,23 @@ export function TransactionsTable({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[32px]" />
+                  <TableHead className="w-[32px]">
+                    <input
+                      type="checkbox"
+                      checked={allCurrentTransactionsSelected}
+                      ref={(node) => {
+                        if (node) {
+                          node.indeterminate =
+                            selectedTransactions.length > 0 &&
+                            !allCurrentTransactionsSelected;
+                        }
+                      }}
+                      onChange={toggleAllCurrentTransactions}
+                      disabled={isBulkUpdating}
+                      aria-label={t("bulkSelectAll")}
+                      className="h-4 w-4 cursor-pointer accent-foreground"
+                    />
+                  </TableHead>
                   <SortableTableHead
                     label={t("headerDate")}
                     field="date"
@@ -514,17 +658,38 @@ export function TransactionsTable({
                     <TableRow
                       key={txn.id}
                       className={cn(
-                        "transition-colors duration-200 hover:bg-muted/50",
+                        "group transition-colors duration-200 hover:bg-muted/50",
                         txn.isExcluded && "opacity-50",
                       )}
                     >
                       <TableCell>
-                        <div style={{ color: directionColor }}>
+                        <div className="relative flex h-4 w-4 items-center justify-center">
+                          <div
+                            className={cn(
+                              "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
+                              selectedIds.includes(txn.id) && "opacity-0",
+                            )}
+                            style={{ color: directionColor }}
+                          >
                           {isIncome ? (
                             <ArrowUpRight className="h-4 w-4" />
                           ) : (
                             <ArrowDownRight className="h-4 w-4" />
                           )}
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(txn.id)}
+                            onChange={() => toggleTransactionSelection(txn.id)}
+                            disabled={isBulkUpdating}
+                            aria-label={t("bulkSelectTransaction", {
+                              description: txn.description,
+                            })}
+                            className={cn(
+                              "absolute inset-0 h-4 w-4 cursor-pointer accent-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100",
+                              selectedIds.includes(txn.id) && "opacity-100",
+                            )}
+                          />
                         </div>
                       </TableCell>
                       <TableCell className="text-sm tabular-nums text-muted-foreground">
