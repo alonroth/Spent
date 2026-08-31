@@ -28,11 +28,21 @@ export interface Transaction {
   provider: string;
   credentialId: number | null;
   accountLabel: string | null;
-  syncRunId: number;
+  syncRunId: number | null;
+  source: "bank" | "recurring" | "deployment";
+  recurringTransactionId: number | null;
   kind: "expense" | "income" | "transfer";
   needsReview: boolean;
   createdAt: string;
   updatedAt: string;
+  deployment: {
+    deploymentId: number;
+    role: "origin" | "slice";
+    originId: number;
+    originDate: string;
+    sliceIndex: number | null;
+    totalMonths: number;
+  } | null;
 }
 
 export interface TransactionWithCategory extends Transaction {
@@ -56,6 +66,21 @@ export interface ReviewTransaction extends TransactionWithCategory {
 }
 
 export type CategoryKind = "expense" | "income";
+export type ExpenseType = "mandatory" | "optional";
+
+export type BudgetMode = "budgeted" | "tracking";
+
+export interface Category {
+  id: number;
+  parentId: number | null;
+  name: string;
+  color: string;
+  icon: string | null;
+  kind: CategoryKind;
+  expenseType: ExpenseType | null;
+  budgetMode: BudgetMode;
+  description: string | null;
+}
 
 export interface RecurringTransaction {
   id: number;
@@ -93,20 +118,8 @@ export interface AnnualTablePayload {
   expenseTotals: number[];
   netTotals: number[];
 }
+
 export type AnnualTableOrder = Record<"mandatory" | "optional", string[]>;
-
-export type BudgetMode = "budgeted" | "tracking";
-
-export interface Category {
-  id: number;
-  parentId: number | null;
-  name: string;
-  color: string;
-  icon: string | null;
-  kind: CategoryKind;
-  budgetMode: BudgetMode;
-  description: string | null;
-}
 
 export type CategoryViewMode = "collapsed" | "expanded";
 
@@ -786,3 +799,4 @@ export interface ExcludedMerchant {
   merchantKey: string;
   createdAt: string;
 }
+
