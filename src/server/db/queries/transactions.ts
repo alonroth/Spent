@@ -141,6 +141,7 @@ interface QueryParams {
   from?: string;
   to?: string;
   search?: string;
+  merchants?: string[];
   category?: number;
   /**
    * Multi-id filter for parent-category aggregation. Takes precedence over
@@ -210,6 +211,10 @@ export function queryTransactions(
     const term = `%${params.search}%`;
     values.push(term, term);
   }
+  if (params.merchants?.length) {
+    conditions.push(`t.description IN (${params.merchants.map(() => "?").join(",")})`);
+    values.push(...params.merchants);
+  }
   if (params.categoryIds && params.categoryIds.length > 0) {
     const placeholders = params.categoryIds.map(() => "?").join(",");
     conditions.push(`t.category_id IN (${placeholders})`);
@@ -260,6 +265,17 @@ export function queryTransactions(
     transactions: rows.map(mapTransactionRow),
     total: countRow.total,
   };
+}
+
+export function getTransactionMerchants(workspaceId: number, params: { from?: string; to?: string; kind?: TransactionKindFilter }): string[] {
+  const conditions = ["workspace_id = ?"];
+  const values: (string | number)[] = [workspaceId];
+  if (params.from) { conditions.push("substr(date, 1, 10) >= ?"); values.push(params.from); }
+  if (params.to) { conditions.push("substr(date, 1, 10) <= ?"); values.push(params.to); }
+  if (params.kind === "income") conditions.push("charged_amount > 0");
+  if (params.kind === "expense") conditions.push("charged_amount < 0");
+  const rows = getDb().prepare(`SELECT DISTINCT description FROM transactions WHERE ${conditions.join(" AND ")} AND description <> '' ORDER BY description COLLATE NOCASE ASC`).all(...values) as { description: string }[];
+  return rows.map((row) => row.description);
 }
 
 export function getUncategorizedTransactionIds(workspaceId: number): number[] {

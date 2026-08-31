@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface TransactionMultiFilterProps {
@@ -19,6 +20,9 @@ interface TransactionMultiFilterProps {
   clearLabel: string;
   onSelectAll: () => void;
   onClear: () => void;
+  searchPlaceholder?: string;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   showBulkActions?: boolean;
   children: React.ReactNode;
 }
@@ -32,6 +36,9 @@ export function TransactionMultiFilter({
   clearLabel,
   onSelectAll,
   onClear,
+  searchPlaceholder,
+  searchValue,
+  onSearchChange,
   showBulkActions = true,
   children,
 }: TransactionMultiFilterProps) {
@@ -57,6 +64,11 @@ export function TransactionMultiFilter({
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60" />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-0">
+        {searchPlaceholder && onSearchChange ? (
+          <div className="border-b border-border p-2">
+            <Input aria-label={searchPlaceholder} autoFocus className="h-8" placeholder={searchPlaceholder} value={searchValue ?? ""} onChange={(event) => onSearchChange(event.target.value)} />
+          </div>
+        ) : null}
         {showBulkActions ? (
           <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
             <Button

@@ -195,6 +195,7 @@ export function getTransactions(params: {
   from?: string;
   to?: string;
   search?: string;
+  merchants?: string[];
   category?: number;
   categoryIds?: number[];
   sort?: string;
@@ -209,7 +210,7 @@ export function getTransactions(params: {
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined) return;
     if (
-      (key === "categoryIds" || key === "credentialIds") &&
+      (key === "categoryIds" || key === "credentialIds" || key === "merchants") &&
       Array.isArray(value)
     ) {
       for (const id of value) searchParams.append(key, String(id));
@@ -220,6 +221,12 @@ export function getTransactions(params: {
   return fetchJSON<{ transactions: TransactionWithCategory[]; total: number }>(
     `/api/transactions?${searchParams}`
   );
+}
+
+export function getTransactionMerchants(params: { from?: string; to?: string; kind?: TransactionKindFilter }) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => { if (value !== undefined) searchParams.set(key, String(value)); });
+  return fetchJSON<string[]>(`/api/transactions/merchants?${searchParams}`);
 }
 
 export function setTransactionKind(id: number, kind: TransactionKind) {

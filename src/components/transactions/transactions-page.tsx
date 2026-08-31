@@ -12,6 +12,7 @@ import { WidgetsRow } from "./widgets-row";
 import {
   getCategories,
   getTransactions,
+  getTransactionMerchants,
   getTransactionsSummary,
   listIntegrations,
 } from "@/lib/api";
@@ -34,6 +35,7 @@ export function TransactionsPage() {
   const locale = useLocale() as Locale;
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [search, setSearch] = useState("");
+  const [merchantFilter, setMerchantFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<number[]>([]);
   const [accountFilter, setAccountFilter] = useState<number[]>([]);
   const [page, setPage] = useState(0);
@@ -62,6 +64,10 @@ export function TransactionsPage() {
     categoryFilter,
     allCategoriesQuery.data ?? []
   );
+  const merchantsQuery = useQuery({
+    queryKey: ["transaction-merchants", from, to, kind],
+    queryFn: () => getTransactionMerchants({ from, to, kind }),
+  });
 
   const transactionsQuery = useQuery({
     queryKey: [
@@ -69,6 +75,7 @@ export function TransactionsPage() {
       from,
       to,
       search,
+      merchantFilter,
       categoryFilter,
       accountFilter,
       page,
@@ -81,6 +88,7 @@ export function TransactionsPage() {
         from,
         to,
         search: search || undefined,
+        merchants: merchantFilter.length ? merchantFilter : undefined,
         categoryIds: expandedCategoryIds,
         credentialIds:
           accountFilter.length > 0 ? accountFilter : undefined,
@@ -145,6 +153,7 @@ export function TransactionsPage() {
                   setKind(opt.value);
                   setPage(0);
                   setCategoryFilter([]);
+                  setMerchantFilter([]);
                 }}
                 className={
                   active
@@ -163,6 +172,7 @@ export function TransactionsPage() {
           total={transactionsQuery.data?.total ?? 0}
           categories={categoriesQuery.data ?? []}
           integrations={integrationsQuery.data ?? []}
+          merchants={merchantsQuery.data ?? []}
           loading={tableInitialLoading}
           isFetching={transactionsQuery.isFetching}
           sortField={sortField}
@@ -175,6 +185,8 @@ export function TransactionsPage() {
           }}
           search={search}
           onSearchChange={setSearch}
+          merchantFilter={merchantFilter}
+          onMerchantFilterChange={(merchants) => { setMerchantFilter(merchants); setPage(0); }}
           categoryFilter={categoryFilter}
           onCategoryFilterChange={(ids) => {
             setCategoryFilter(ids);

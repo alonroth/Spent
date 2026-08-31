@@ -157,6 +157,8 @@
     "allCategories": "All categories",
     "allAccounts": "All accounts",
     "filterAccount": "Account",
+    "filterMerchant": "Merchant",
+    "filterMerchantSearch": "Search merchants...",
     "filterCategory": "Category",
     "filterAny": "Any",
     "filterClear": "Clear filters",

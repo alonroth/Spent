@@ -34,6 +34,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Wallet,
+  Store,
   Tags,
   EyeOff,
   Eye,
@@ -82,9 +83,12 @@ interface TransactionsTableProps {
   total: number;
   categories: Category[];
   integrations: Integration[];
+  merchants: string[];
   loading: boolean;
   search: string;
   onSearchChange: (search: string) => void;
+  merchantFilter: string[];
+  onMerchantFilterChange: (merchants: string[]) => void;
   categoryFilter: number[];
   onCategoryFilterChange: (categoryIds: number[]) => void;
   accountFilter: number[];
@@ -104,9 +108,12 @@ export function TransactionsTable({
   total,
   categories,
   integrations,
+  merchants,
   loading,
   search,
   onSearchChange,
+  merchantFilter,
+  onMerchantFilterChange,
   categoryFilter,
   onCategoryFilterChange,
   accountFilter,
@@ -124,6 +131,7 @@ export function TransactionsTable({
   const locale = useLocale() as Locale;
   const queryClient = useQueryClient();
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [merchantSearch, setMerchantSearch] = useState("");
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   const otherKinds: Record<Kind, Array<{ value: Kind; label: string }>> = {
@@ -245,7 +253,7 @@ export function TransactionsTable({
 
   const showAccountFilter = accountOptions.length > 1;
 
-  const toggleFilterId = (ids: number[], id: number): number[] =>
+  const toggleFilterId = <T,>(ids: T[], id: T): T[] =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
 
   const accountLabels = accountFilter
@@ -271,13 +279,16 @@ export function TransactionsTable({
     t("filterAny"),
     (count) => t("filterSelectedCount", { count })
   );
+  const merchantDisplayValue = formatMultiFilterDisplay(merchantFilter, t("filterAny"), (count) => t("filterSelectedCount", { count }));
+  const filteredMerchants = merchants.filter((merchant) => merchant.toLocaleLowerCase(locale).includes(merchantSearch.trim().toLocaleLowerCase(locale)));
 
   const hasActiveFilters =
-    categoryFilter.length > 0 || accountFilter.length > 0;
+    categoryFilter.length > 0 || accountFilter.length > 0 || merchantFilter.length > 0;
 
   const handleClearFilters = () => {
     onCategoryFilterChange([]);
     onAccountFilterChange([]);
+    onMerchantFilterChange([]);
     onPageChange(0);
   };
 
@@ -329,6 +340,25 @@ export function TransactionsTable({
               className="h-2 w-2 shrink-0 rounded-full"
               style={{ backgroundColor: cat.color }}
             />
+            <TransactionMultiFilter
+              label={t("filterMerchant")}
+              icon={Store}
+              displayValue={merchantDisplayValue}
+              triggerClassName="w-[200px]"
+              searchPlaceholder={t("filterMerchantSearch")}
+              searchValue={merchantSearch}
+              onSearchChange={setMerchantSearch}
+              selectAllLabel={t("filterSelectAll")}
+              clearLabel={t("filterClearSelection")}
+              onSelectAll={() => onMerchantFilterChange(merchants)}
+              onClear={() => onMerchantFilterChange([])}
+            >
+              {filteredMerchants.map((merchant) => (
+                <MultiFilterOption key={merchant} selected={merchantFilter.includes(merchant)} onToggle={() => onMerchantFilterChange(toggleFilterId(merchantFilter, merchant))}>
+                  <span className="truncate">{merchant}</span>
+                </MultiFilterOption>
+              ))}
+            </TransactionMultiFilter>
             {name}
           </div>
         </MultiFilterOption>
@@ -437,7 +467,7 @@ export function TransactionsTable({
           </div>
         ) : transactions.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
-            {search || categoryFilter.length > 0 || accountFilter.length > 0
+            {search || categoryFilter.length > 0 || accountFilter.length > 0 || merchantFilter.length > 0
               ? t("emptyWithFilters")
               : t("emptyNoData")}
           </div>

@@ -27,11 +27,13 @@ export async function GET(request: Request) {
     .getAll("credentialIds")
     .map((v) => Number(v))
     .filter((n) => Number.isFinite(n) && n > 0);
+  const merchants = searchParams.getAll("merchants").filter(Boolean);
 
   const result = queryTransactions(workspaceId, {
     from: searchParams.get("from") ?? undefined,
     to: searchParams.get("to") ?? undefined,
     search: searchParams.get("search") ?? undefined,
+    merchants: merchants.length ? merchants : undefined,
     category: searchParams.has("category")
       ? Number(searchParams.get("category"))
       : undefined,
