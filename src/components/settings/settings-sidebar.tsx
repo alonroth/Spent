@@ -10,6 +10,7 @@ import {
   Sparkles,
   Layers,
   ShieldAlert,
+  Wifi,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +80,12 @@ const GROUPS: NavGroup[] = [
         labelKey: "data",
         Icon: ShieldAlert,
         match: (p) => p.startsWith("/settings/data"),
+      },
+      {
+        href: "/settings/security",
+        labelKey: "security",
+        Icon: Wifi,
+        match: (p) => p.startsWith("/settings/security"),
       },
     ],
   },

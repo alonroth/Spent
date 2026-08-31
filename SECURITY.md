@@ -70,6 +70,45 @@ doesn't match the app's own host. This prevents a malicious tab in
 your browser from triggering syncs / category changes against your
 localhost.
 
+## Optional phone access
+
+LAN access is **off by default**. When enabled from **Settings → Security &
+remote access**, Spent keeps Next.js on `127.0.0.1:41234` and starts a separate
+HTTPS reverse proxy on the first detected RFC1918 IPv4 address at port `41235`.
+It does not bind `0.0.0.0`, advertise a public service, or provide internet
+exposure.
+
+The boundary requires a user-configured password stored only as a salted,
+slow PBKDF2-SHA-512 verifier. It creates an 8-hour in-memory session with an
+HttpOnly, Secure, SameSite=Strict cookie, locks out five failed attempts for
+five minutes, and checks Host, Fetch Metadata, Origin/Referer, and same-origin
+CSRF conditions before forwarding to loopback. Logout immediately removes the
+session. The certificate and private key are stored in the configured data
+directory with restrictive permissions; the password, session tokens, bank
+credentials, and API keys are never logged.
+
+### Phone setup
+
+1. On the computer, open Spent locally and go to **Settings → Security &
+   remote access**.
+2. Set and confirm a unique password, then choose **Enable LAN access**.
+3. Copy the displayed `https://private-ip:41235` URL. The URL is shown only
+   while the boundary is enabled and running.
+4. On the phone, while connected to the same trusted home Wi-Fi, open the
+   certificate download link shown on that page. Install and trust the
+   downloaded certificate in the phone’s system certificate settings. This is
+   a self-signed local certificate, so the exact prompts vary by iOS/Android
+   version and may require a device passcode.
+5. Open the copied HTTPS URL and sign in with the access password. Use the
+   visible **Log out** action when finished.
+6. Disable LAN access before using the computer on public Wi-Fi. If the home
+   network address changes, disable and enable the feature again to bind the
+   new private address.
+
+The safer alternative for access outside the home network is a separately
+managed VPN such as WireGuard or Tailscale. Spent does not silently install or
+depend on one; public exposure and port forwarding are unsupported.
+
 ## Browser security headers
 
 Configured in `next.config.ts`:

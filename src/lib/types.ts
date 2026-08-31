@@ -289,6 +289,15 @@ export interface AppSettings {
   autoSyncEnabled: boolean;
   autoSyncTime: string;
   language: "en" | "he";
+  remoteAccess?: {
+    enabled: boolean;
+    configured: boolean;
+    running: boolean;
+    host: string | null;
+    port: number;
+    url: string | null;
+    certificateUrl: string | null;
+  };
 }
 
 export type BankProvider =

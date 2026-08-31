@@ -149,7 +149,13 @@ export function getSettings() {
   return fetchJSON<AppSettings>("/api/settings");
 }
 
-export function updateSettings(settings: Partial<AppSettings>) {
+export function updateSettings(
+  settings: Partial<AppSettings> & {
+    remoteAccessEnabled?: boolean;
+    remoteAccessPassword?: string;
+    remoteAccessPasswordConfirmation?: string;
+  }
+) {
   return fetchJSON<AppSettings>("/api/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
