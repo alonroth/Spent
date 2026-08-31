@@ -240,7 +240,7 @@ export function queryTransactions(
 
   const sortSql = resolveSortSql(params.sort);
   const sortOrder = params.order === "asc" ? "ASC" : "DESC";
-  const limit = Math.min(params.limit ?? 50, 200);
+  const limit = Math.min(params.limit ?? 50, 300);
   const offset = params.offset ?? 0;
 
   const countRow = db
