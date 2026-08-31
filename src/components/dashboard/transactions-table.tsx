@@ -339,7 +339,7 @@ export function TransactionsTable({
   };
 
   return (
-    <Card className="rounded-2xl border border-border bg-card shadow-none">
+    <Card className="rounded-2xl border border-border bg-card shadow-none lg:col-span-2">
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
           <CardTitle className="font-serif text-2xl font-normal">
