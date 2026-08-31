@@ -12,6 +12,7 @@ import { WidgetsRow } from "./widgets-row";
 import {
   getCategories,
   getTransactions,
+  getTransactionTotals,
   getTransactionsSummary,
   listIntegrations,
 } from "@/lib/api";
@@ -93,6 +94,19 @@ export function TransactionsPage() {
     placeholderData: keepPreviousData,
   });
 
+  const totalsQuery = useQuery({
+    queryKey: ["transactions-totals", from, to, search, expandedCategoryIds, accountFilter, kind],
+    queryFn: () => getTransactionTotals({
+      from,
+      to,
+      search: search || undefined,
+      categoryIds: expandedCategoryIds,
+      credentialIds: accountFilter.length ? accountFilter : undefined,
+      kind,
+    }),
+    placeholderData: keepPreviousData,
+  });
+
   const summaryQuery = useQuery({
     queryKey: ["transactions-summary", from, to],
     queryFn: () => getTransactionsSummary({ from, to }),
@@ -165,6 +179,8 @@ export function TransactionsPage() {
           integrations={integrationsQuery.data ?? []}
           loading={tableInitialLoading}
           isFetching={transactionsQuery.isFetching}
+          totals={totalsQuery.data}
+          totalsLoading={totalsQuery.isPending && totalsQuery.data === undefined}
           sortField={sortField}
           sortOrder={sortOrder}
           onSortChange={(field) => {

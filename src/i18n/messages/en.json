@@ -191,6 +191,8 @@
     "excludeMerchantToast": "Excluded '{merchant}' going forward",
     "includeToast": "Included in totals",
     "paginationRange": "{from} to {to} of {total}",
+    "filteredTotal": "Filtered total ({count} transactions)",
+    "filteredBreakdown": "Income {income} · Expenses {expense}",
     "previous": "Previous",
     "next": "Next"
   },

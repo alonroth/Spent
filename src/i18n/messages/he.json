@@ -191,6 +191,8 @@
     "excludeMerchantToast": "‘{merchant}’ יוחרג מעכשיו",
     "includeToast": "הוחזר לסכומים",
     "paginationRange": "{from} עד {to} מתוך {total}",
+    "filteredTotal": "סך הכול בסינון ({count} תנועות)",
+    "filteredBreakdown": "הכנסות {income} · הוצאות {expense}",
     "previous": "הקודם",
     "next": "הבא"
   },
