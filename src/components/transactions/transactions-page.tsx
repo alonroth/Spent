@@ -85,8 +85,8 @@ export function TransactionsPage() {
         categoryIds: expandedCategoryIds,
         credentialIds:
           accountFilter.length > 0 ? accountFilter : undefined,
-        limit: 50,
-        offset: page * 50,
+        limit: 300,
+        offset: page * 300,
         kind,
         sort: sortField,
         order: sortOrder,
