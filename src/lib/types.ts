@@ -57,6 +57,44 @@ export interface ReviewTransaction extends TransactionWithCategory {
 
 export type CategoryKind = "expense" | "income";
 
+export interface RecurringTransaction {
+  id: number;
+  description: string;
+  amount: number;
+  kind: CategoryKind;
+  categoryId: number;
+  startMonth: string;
+  endMonth: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AnnualTableSectionKey = "income" | "mandatory" | "optional";
+export interface AnnualTableRow {
+  categoryId: number | null;
+  name: string;
+  amounts: number[];
+  average: number;
+  outliers: Array<"high" | "low" | null>;
+  isUncategorized?: boolean;
+}
+export interface AnnualTableSection {
+  key: AnnualTableSectionKey;
+  rows: AnnualTableRow[];
+  totals: number[];
+  average: number;
+}
+export interface AnnualTablePayload {
+  year: number;
+  availableYears: number[];
+  sections: AnnualTableSection[];
+  incomeTotals: number[];
+  expenseTotals: number[];
+  netTotals: number[];
+}
+export type AnnualTableOrder = Record<"mandatory" | "optional", string[]>;
+
 export type BudgetMode = "budgeted" | "tracking";
 
 export interface Category {

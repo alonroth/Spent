@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Wallet,
   ArrowLeftRight,
+  TableProperties,
   Settings as SettingsIcon,
   Star,
   ClipboardCheck,
@@ -35,6 +36,12 @@ interface NavDef {
 }
 
 const NAV: NavDef[] = [
+  {
+    href: "/table",
+    labelKey: "table",
+    Icon: TableProperties,
+    match: (p: string) => p.startsWith("/table"),
+  },
   {
     href: "/",
     labelKey: "home",
@@ -203,3 +210,4 @@ function ReviewBadge({ count }: { count: number }) {
     </span>
   );
 }
+
