@@ -61,7 +61,11 @@ function classifyError(error: unknown): {
   // Bot-protection block from the bank. The Isracard variant returns
   // "result: Block Automation" out of the ValidateIdData endpoint, so this
   // must match BEFORE the ValidateIdData credential check below.
-  if (/Block Automation|Cloudflare|captcha|recaptcha/i.test(msg)) {
+  if (
+    /Block Automation|Automation detected and blocked|Cloudflare|captcha|recaptcha/i.test(
+      msg
+    )
+  ) {
     return {
       retryable: false,
       friendly:
