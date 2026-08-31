@@ -78,6 +78,7 @@ export function Dashboard() {
     queryClient.invalidateQueries({ queryKey: ["summary"] });
     queryClient.invalidateQueries({ queryKey: ["transactions"] });
     queryClient.invalidateQueries({ queryKey: ["settings"] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
   }, [queryClient]);
 
   const monthLabel = period.mode === "month"

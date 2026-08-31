@@ -85,6 +85,7 @@ export function HomePage() {
     queryClient.invalidateQueries({ queryKey: ["transactions"] });
     queryClient.invalidateQueries({ queryKey: ["settings"] });
     queryClient.invalidateQueries({ queryKey: ["activity"] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
   }, [queryClient]);
 
   return (

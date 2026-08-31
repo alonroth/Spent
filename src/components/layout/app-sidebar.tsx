@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
   LayoutDashboard,
@@ -9,6 +10,7 @@ import {
   ArrowLeftRight,
   Settings as SettingsIcon,
   Star,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -23,6 +25,7 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+import { getReviewQueue, reviewQueueQueryKey } from "@/lib/api";
 
 interface NavDef {
   href: string;
@@ -50,6 +53,12 @@ const NAV: NavDef[] = [
     Icon: ArrowLeftRight,
     match: (p: string) => p.startsWith("/transactions"),
   },
+  {
+    href: "/review",
+    labelKey: "review",
+    Icon: ClipboardCheck,
+    match: (p: string) => p.startsWith("/review"),
+  },
 ];
 
 const FOOTER_NAV: NavDef[] = [
@@ -64,6 +73,11 @@ const FOOTER_NAV: NavDef[] = [
 export function AppSidebar() {
   const pathname = usePathname();
   const t = useTranslations("nav");
+  const reviewQueue = useQuery({
+    queryKey: reviewQueueQueryKey,
+    queryFn: getReviewQueue,
+  });
+  const reviewCount = reviewQueue.data?.total ?? 0;
 
   return (
     <Sidebar collapsible="icon">
@@ -100,17 +114,27 @@ export function AppSidebar() {
             <SidebarMenu>
               {NAV.map((item) => {
                 const label = t(item.labelKey);
+                const isReview = item.href === "/review";
+                const disabled = isReview && reviewCount === 0;
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
-                      render={
+                      render={disabled ? (
+                        <button type="button" aria-label={label}>
+                          <item.Icon />
+                          <span>{label}</span>
+                          <ReviewBadge count={reviewCount} />
+                        </button>
+                      ) : (
                         <Link href={item.href}>
                           <item.Icon />
                           <span>{label}</span>
+                          {isReview ? <ReviewBadge count={reviewCount} /> : null}
                         </Link>
-                      }
+                      )}
                       isActive={item.match(pathname)}
                       tooltip={label}
+                      disabled={disabled}
                     />
                   </SidebarMenuItem>
                 );
@@ -166,5 +190,16 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+function ReviewBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={String(count)}
+      className="ms-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold leading-none text-primary-foreground group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:end-0.5 group-data-[collapsible=icon]:top-0.5"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }
