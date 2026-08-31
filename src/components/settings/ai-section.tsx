@@ -69,6 +69,7 @@ function AIForm({ settings }: { settings: AppSettings }) {
     settings.aiProvider
   );
   const [apiKey, setApiKey] = useState("");
+  const [geminiModel, setGeminiModel] = useState(settings.geminiModel);
   const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaUrl);
   const [ollamaModel, setOllamaModel] = useState(settings.ollamaModel);
 
@@ -76,7 +77,8 @@ function AIForm({ settings }: { settings: AppSettings }) {
     mutationFn: () =>
       saveAIConfig({
         provider,
-        apiKey: provider === "claude" && apiKey ? apiKey : undefined,
+        apiKey: (provider === "claude" || provider === "gemini") && apiKey ? apiKey : undefined,
+        geminiModel: provider === "gemini" ? geminiModel : undefined,
         ollamaUrl: provider === "ollama" ? ollamaUrl : undefined,
         ollamaModel: provider === "ollama" ? ollamaModel : undefined,
       }),
@@ -93,9 +95,14 @@ function AIForm({ settings }: { settings: AppSettings }) {
         title={t("providerCardTitle")}
         description={t("providerCardDescription")}
       >
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-4">
           {(
             [
+              {
+                id: "gemini" as const,
+                title: t("providerGeminiTitle"),
+                desc: t("providerGeminiDesc"),
+              },
               {
                 id: "claude" as const,
                 title: t("providerClaudeTitle"),
@@ -148,6 +155,31 @@ function AIForm({ settings }: { settings: AppSettings }) {
             <p className="text-xs text-muted-foreground">
               {t("leaveBlankHint")}
             </p>
+          </div>
+        </SettingCard>
+      )}
+
+      {provider === "gemini" && (
+        <SettingCard title={t("geminiKeyCardTitle")} description={t("geminiKeyCardDescription")}>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="gemini-key">{t("apiKeyLabel")}</Label>
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">{t("getGeminiKey")}</a>
+              </div>
+              <Input id="gemini-key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="AIza..." />
+              <p className="text-xs text-muted-foreground">{t("leaveBlankHint")}</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="gemini-model">{t("modelLabel")}</Label>
+              <Select value={geminiModel} onValueChange={(v) => v && setGeminiModel(v as typeof geminiModel)}>
+                <SelectTrigger id="gemini-model"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini-3.7-flash">Gemini 3.7 Flash</SelectItem>
+                  <SelectItem value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite · lower cost</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </SettingCard>
       )}
