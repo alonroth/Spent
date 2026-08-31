@@ -5,7 +5,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { PageHeader } from "@/components/layout/app-shell";
 import { TransactionsTable } from "@/components/dashboard/transactions-table";
-import { PeriodSelector } from "@/components/dashboard/period-selector";
+import { TransactionsPeriodSelector } from "./transactions-period-selector";
 import { AINotConnectedBanner } from "@/components/ai-not-connected-banner";
 import { KpiCards } from "./kpi-cards";
 import { WidgetsRow } from "./widgets-row";
@@ -24,15 +24,34 @@ import {
 } from "@/lib/transaction-sort";
 import {
   addMonths,
+  formatMonth,
   formatMonthLabel,
   getMonthRange,
 } from "@/lib/formatters";
 import type { Locale } from "@/i18n/routing";
 
+function monthDate(value: string): Date {
+  return new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, 1);
+}
+
+function monthValue(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftRange(from: string, to: string, amount: number) {
+  return {
+    from: getMonthRange(addMonths(monthDate(from), amount)).from,
+    to: getMonthRange(addMonths(monthDate(to), amount)).to,
+  };
+}
+
 export function TransactionsPage() {
   const t = useTranslations("transactions");
   const locale = useLocale() as Locale;
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [period, setPeriod] = useState<
+    | { mode: "month"; month: string }
+    | { mode: "range"; from: string; to: string }
+  >(() => ({ mode: "month", month: monthValue(new Date()) }));
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<number[]>([]);
   const [accountFilter, setAccountFilter] = useState<number[]>([]);
@@ -47,7 +66,10 @@ export function TransactionsPage() {
     { value: "expense", label: t("filterExpenses") },
   ];
 
-  const { from, to } = getMonthRange(selectedDate);
+  const selectedDate = period.mode === "month" ? monthDate(period.month) : monthDate(period.from);
+  const monthRange = getMonthRange(selectedDate);
+  const from = period.mode === "month" ? monthRange.from : period.from;
+  const to = period.mode === "month" ? monthRange.to : period.to;
 
   const allCategoriesQuery = useQuery({
     queryKey: ["categories"],
@@ -104,7 +126,9 @@ export function TransactionsPage() {
       kind === "income" ? getCategories("income") : getCategories("expense"),
   });
 
-  const monthLabel = formatMonthLabel(selectedDate, locale);
+  const monthLabel = period.mode === "month"
+    ? formatMonthLabel(selectedDate, locale)
+    : `${formatMonth(period.from, locale)} – ${formatMonth(period.to, locale)}`;
 
   const summaryInitialLoading =
     summaryQuery.isPending && summaryQuery.data === undefined;
@@ -117,10 +141,27 @@ export function TransactionsPage() {
         title={t("pageTitle")}
         meta={monthLabel}
         actions={
-          <PeriodSelector
+          <TransactionsPeriodSelector
+            mode={period.mode}
+            month={period.mode === "month" ? period.month : period.from.slice(0, 7)}
+            from={from}
+            to={to}
             label={monthLabel}
-            onPrev={() => setSelectedDate((d) => addMonths(d, -1))}
-            onNext={() => setSelectedDate((d) => addMonths(d, 1))}
+            onPrev={() => {
+              if (period.mode === "month") setPeriod({ mode: "month", month: monthValue(addMonths(selectedDate, -1)) });
+              else setPeriod({ mode: "range", ...shiftRange(period.from, period.to, -1) });
+            }}
+            onNext={() => {
+              if (period.mode === "month") setPeriod({ mode: "month", month: monthValue(addMonths(selectedDate, 1)) });
+              else setPeriod({ mode: "range", ...shiftRange(period.from, period.to, 1) });
+            }}
+            onMonthChange={(month) => setPeriod({ mode: "month", month })}
+            onRangeApply={(rangeFrom, rangeTo) => setPeriod({
+              mode: "range",
+              from: `${rangeFrom}-01`,
+              to: getMonthRange(new Date(Number(rangeTo.slice(0, 4)), Number(rangeTo.slice(5, 7)), 0)).to,
+            })}
+            onReset={() => setPeriod({ mode: "month", month: monthValue(new Date()) })}
           />
         }
       />
