@@ -5,10 +5,17 @@ import { computeDedupHash } from "../../lib/dedup";
 import { detectKind } from "../../lib/transfers";
 import type {
   TransactionWithCategory,
+  ReviewTransaction,
   MonthlySummary,
   MerchantSummary,
   CategoryBreakdown,
 } from "@/lib/types";
+import {
+  batchSetLowConfidenceReviewReasons,
+  getActiveReviewReasons,
+  resolveAllReviewReasons,
+  ensureInitialRecurringPriceScan,
+} from "./transaction-review-reasons";
 import {
   isTransactionSortField,
   TRANSACTION_SORT_SQL,
@@ -35,6 +42,7 @@ interface RawTransaction {
 interface InsertResult {
   added: number;
   updated: number;
+  transactionIds: number[];
 }
 
 export function insertTransactions(
@@ -47,11 +55,15 @@ export function insertTransactions(
   const db = getDb();
   let added = 0;
   let updated = 0;
+  const transactionIds: number[] = [];
 
   const hashCounts = new Map<string, number>();
 
   const existingCountStmt = db.prepare(
     "SELECT COUNT(*) as count FROM transactions WHERE workspace_id = ? AND dedup_hash = ?"
+  );
+  const existingStatusStmt = db.prepare(
+    "SELECT status FROM transactions WHERE workspace_id = ? AND dedup_hash = ? AND dedup_sequence = ?"
   );
 
   const insertStmt = db.prepare(`
@@ -123,10 +135,17 @@ export function insertTransactions(
 
       if (batchCount > existingCount) {
         insertStmt.run(params);
+        const row = db.prepare("SELECT id FROM transactions WHERE workspace_id = ? AND dedup_hash = ? AND dedup_sequence = ?").get(workspaceId, hash, sequence) as { id: number };
+        transactionIds.push(row.id);
         added++;
       } else {
+        const existing = existingStatusStmt.get(workspaceId, hash, sequence) as { status: string } | undefined;
         const result = insertStmt.run(params);
         if (result.changes > 0) {
+          if (existing?.status === "pending" && txn.status === "completed") {
+            const row = db.prepare("SELECT id FROM transactions WHERE workspace_id = ? AND dedup_hash = ? AND dedup_sequence = ?").get(workspaceId, hash, sequence) as { id: number };
+            transactionIds.push(row.id);
+          }
           updated++;
         }
       }
@@ -134,7 +153,7 @@ export function insertTransactions(
   });
 
   batchInsert();
-  return { added, updated };
+  return { added, updated, transactionIds };
 }
 
 interface QueryParams {
@@ -268,8 +287,9 @@ export function queryTransactions(
  */
 export function getReviewTransactions(
   workspaceId: number,
-): { transactions: TransactionWithCategory[]; total: number } {
+): { transactions: ReviewTransaction[]; total: number } {
   const db = getDb();
+  ensureInitialRecurringPriceScan(workspaceId);
   const where = `WHERE t.workspace_id = ?
     AND t.needs_review = 1
     AND t.status = 'completed'
@@ -287,8 +307,10 @@ export function getReviewTransactions(
     )
     .all(workspaceId);
 
+  const transactions = rows.map(mapTransactionRow);
+  const reasons = getActiveReviewReasons(workspaceId, transactions.map((transaction) => transaction.id));
   return {
-    transactions: rows.map(mapTransactionRow),
+    transactions: transactions.map((transaction) => ({ ...transaction, reviewReasons: reasons.get(transaction.id) ?? [] })),
     total: countRow.total,
   };
 }
@@ -661,13 +683,11 @@ export function setTransactionNeedsReview(
   id: number,
   value: boolean
 ): void {
-  getDb()
-    .prepare(
-      `UPDATE transactions
-       SET needs_review = ?, updated_at = datetime('now')
-       WHERE workspace_id = ? AND id = ?`
-    )
-    .run(value ? 1 : 0, workspaceId, id);
+  if (value) {
+    batchSetLowConfidenceReviewReasons(workspaceId, [{ id, active: true }]);
+  } else {
+    resolveAllReviewReasons(workspaceId, id);
+  }
 }
 
 interface TransactionContext {
@@ -698,17 +718,7 @@ export function batchSetNeedsReview(
   updates: { id: number; needsReview: boolean }[]
 ): void {
   if (updates.length === 0) return;
-  const db = getDb();
-  const stmt = db.prepare(
-    `UPDATE transactions
-     SET needs_review = ?, updated_at = datetime('now')
-     WHERE workspace_id = ? AND id = ?`
-  );
-  db.transaction(() => {
-    for (const { id, needsReview } of updates) {
-      stmt.run(needsReview ? 1 : 0, workspaceId, id);
-    }
-  })();
+  batchSetLowConfidenceReviewReasons(workspaceId, updates.map(({ id, needsReview }) => ({ id, active: needsReview })));
 }
 
 export interface NeedsReviewCount {

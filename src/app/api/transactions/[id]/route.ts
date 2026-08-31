@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import {
   updateTransactionCategory,
   setTransactionKind,
-  setTransactionNeedsReview,
   getTransactionContext,
 } from "@/server/db/queries/transactions";
+import { resolveAllReviewReasons } from "@/server/db/queries/transaction-review-reasons";
 import { recordMerchantCategory } from "@/server/lib/merchant-memory";
 import { recordCorrection } from "@/server/db/queries/category-corrections";
 import { getAllCategories } from "@/server/db/queries/categories";
@@ -29,7 +29,7 @@ export async function PUT(
 
   const before = getTransactionContext(workspaceId, numericId);
   updateTransactionCategory(workspaceId, numericId, body.categoryId, "user");
-  setTransactionNeedsReview(workspaceId, numericId, false);
+  resolveAllReviewReasons(workspaceId, numericId);
 
   if (before && (before.kind === "expense" || before.kind === "income")) {
     const category = getAllCategories(workspaceId).find(
@@ -83,7 +83,7 @@ export async function PATCH(
     if (!ctx) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
-    setTransactionNeedsReview(workspaceId, numericId, false);
+    resolveAllReviewReasons(workspaceId, numericId);
     if (
       ctx.categoryId != null &&
       (ctx.kind === "expense" || ctx.kind === "income")

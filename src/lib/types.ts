@@ -41,6 +41,20 @@ export interface TransactionWithCategory extends Transaction {
   isExcluded: boolean;
 }
 
+export type ReviewReason =
+  | { type: "low_confidence_category" }
+  | {
+      type: "recurring_price_increase";
+      previousAmount: number;
+      currency: string;
+      stableMonths: number;
+      increasePercent: number;
+    };
+
+export interface ReviewTransaction extends TransactionWithCategory {
+  reviewReasons: ReviewReason[];
+}
+
 export type CategoryKind = "expense" | "income";
 
 export type BudgetMode = "budgeted" | "tracking";

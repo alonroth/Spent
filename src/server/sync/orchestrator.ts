@@ -21,6 +21,10 @@ import {
   batchSetNeedsReview,
 } from "@/server/db/queries/transactions";
 import {
+  detectRecurringPriceIncreases,
+  ensureInitialRecurringPriceScan,
+} from "@/server/db/queries/transaction-review-reasons";
+import {
   lookupMerchantCategoriesBulk,
   normalizeMerchant,
   incrementMerchantHits,
@@ -64,6 +68,7 @@ export interface ProviderResult {
   updated: number;
   errorMessage?: string;
   syncRunId?: number;
+  transactionIds?: number[];
 }
 
 export interface WorkspaceSummary {
@@ -256,7 +261,7 @@ async function syncOneCredential(
     }))
   );
 
-  const { added, updated } = insertTransactions(
+  const { added, updated, transactionIds } = insertTransactions(
     workspaceId,
     allTransactions,
     provider,
@@ -274,6 +279,7 @@ async function syncOneCredential(
     added,
     updated,
     syncRunId,
+    transactionIds,
   };
 }
 
@@ -412,6 +418,13 @@ export async function syncWorkspace(
 
   const totalAdded = results.reduce((s, r) => s + r.added, 0);
   const totalUpdated = results.reduce((s, r) => s + r.updated, 0);
+  const initialPriceScan = ensureInitialRecurringPriceScan(workspaceId);
+  if (!initialPriceScan) {
+    detectRecurringPriceIncreases(
+      workspaceId,
+      results.flatMap((result) => result.transactionIds ?? []),
+    );
+  }
 
   let categorized = 0;
   let aiWarning: string | null = null;

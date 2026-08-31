@@ -2,6 +2,7 @@ import type {
   SetupStatus,
   AppSettings,
   TransactionWithCategory,
+  ReviewTransaction,
   DashboardSummary,
   Category,
   SyncRun,
@@ -223,7 +224,7 @@ export function getTransactions(params: {
 }
 
 export interface ReviewQueue {
-  transactions: TransactionWithCategory[];
+  transactions: ReviewTransaction[];
   total: number;
 }
 

@@ -34,7 +34,7 @@ import {
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { translateCategoryName } from "@/lib/i18n-data";
-import type { Category, TransactionWithCategory } from "@/lib/types";
+import type { Category, ReviewTransaction } from "@/lib/types";
 import type { Locale } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -44,9 +44,9 @@ type ReviewView =
   | { kind: "history"; index: number };
 
 function replaceCategory(
-  transaction: TransactionWithCategory,
+  transaction: ReviewTransaction,
   category: Category,
-): TransactionWithCategory {
+): ReviewTransaction {
   return {
     ...transaction,
     categoryId: category.id,
@@ -62,7 +62,7 @@ export function ReviewPage() {
   const tCat = useTranslations("categoriesSeeded");
   const locale = useLocale() as Locale;
   const queryClient = useQueryClient();
-  const [history, setHistory] = useState<TransactionWithCategory[]>([]);
+  const [history, setHistory] = useState<ReviewTransaction[]>([]);
   const [view, setView] = useState<ReviewView>({ kind: "pending", index: 0 });
   const [categorySearch, setCategorySearch] = useState("");
   const [updating, setUpdating] = useState(false);
@@ -114,7 +114,7 @@ export function ReviewPage() {
   };
 
   const resolveCurrent = (
-    updated: TransactionWithCategory,
+    updated: ReviewTransaction,
     removedIds = new Set([updated.id]),
   ) => {
     if (!current || isHistory) return;
@@ -257,6 +257,22 @@ export function ReviewPage() {
                   ) : null}
                 </div>
               </div>
+
+              {current.reviewReasons.length > 0 ? (
+                <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                  {current.reviewReasons.map((reason, index) => (
+                    <p key={`${reason.type}-${index}`} className="text-amber-900 dark:text-amber-100">
+                      {reason.type === "recurring_price_increase"
+                        ? t("priceIncreaseReason", {
+                            amount: formatCurrency(reason.previousAmount, reason.currency, locale),
+                            months: reason.stableMonths,
+                            percent: reason.increasePercent,
+                          })
+                        : t("lowConfidenceReason")}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="grid gap-4 border-y border-border py-4 sm:grid-cols-2">
                 <div>

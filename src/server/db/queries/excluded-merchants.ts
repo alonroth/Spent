@@ -2,6 +2,7 @@ import "server-only";
 
 import { getDb } from "../index";
 import type { ExcludedMerchant } from "@/lib/types";
+import { resolveAllReviewReasons } from "./transaction-review-reasons";
 
 interface RawExcludedMerchantRow {
   id: number;
@@ -113,4 +114,5 @@ export function setTransactionExcluded(
        WHERE workspace_id = ? AND id = ?`
     )
     .run(excluded ? 1 : 0, workspaceId, id);
+  if (excluded) resolveAllReviewReasons(workspaceId, id);
 }

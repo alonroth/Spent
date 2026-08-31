@@ -204,6 +204,8 @@
     "amount": "Amount",
     "priceIncreaseReason": "Price increased from {amount} after {months, plural, one {# month} other {# months}} at that price ({percent}% higher).",
     "lowConfidenceReason": "The category suggestion has low confidence.",
+    "priceIncreaseReason": "Price increased from {amount} after {months, plural, one {# month} other {# months}} at that price ({percent}% higher).",
+    "lowConfidenceReason": "The category suggestion has low confidence.",
     "account": "Account",
     "memo": "Memo",
     "installment": "Payment {current} of {total}",

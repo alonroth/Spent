@@ -204,6 +204,8 @@
     "amount": "סכום",
     "priceIncreaseReason": "המחיר עלה מ־{amount} לאחר {months, plural, one {חודש אחד} other {# חודשים}} במחיר הזה ({percent}% יותר).",
     "lowConfidenceReason": "הקטגוריה שהוצעה אינה ודאית.",
+    "priceIncreaseReason": "המחיר עלה מ־{amount} לאחר {months, plural, one {חודש אחד} other {# חודשים}} במחיר הזה ({percent}% יותר).",
+    "lowConfidenceReason": "הקטגוריה שהוצעה אינה ודאית.",
     "account": "חשבון",
     "memo": "הערה",
     "installment": "תשלום {current} מתוך {total}",
