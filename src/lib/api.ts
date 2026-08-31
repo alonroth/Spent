@@ -222,6 +222,17 @@ export function getTransactions(params: {
   );
 }
 
+export interface ReviewQueue {
+  transactions: TransactionWithCategory[];
+  total: number;
+}
+
+export const reviewQueueQueryKey = ["review-queue"] as const;
+
+export function getReviewQueue() {
+  return fetchJSON<ReviewQueue>("/api/review");
+}
+
 export function setTransactionKind(id: number, kind: TransactionKind) {
   return fetchJSON<{ success: boolean }>(`/api/transactions/${id}`, {
     method: "PATCH",

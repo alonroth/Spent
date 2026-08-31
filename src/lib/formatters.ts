@@ -13,17 +13,29 @@ export function formatCurrency(
   locale?: Locale,
 ): string {
   const bcp = bcp47(locale);
-  if (currency === "ILS") {
+  const normalizedCurrency = currency.trim().toUpperCase();
+  // Some bank providers return a display symbol instead of an ISO 4217 code.
+  // Normalize the common local forms before passing the value to Intl.
+  if (["ILS", "₪", "NIS", "SHEKEL", "SHEKELS"].includes(normalizedCurrency)) {
     return `₪${Math.abs(amount).toLocaleString(bcp, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
   }
-  return new Intl.NumberFormat(bcp, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-  }).format(Math.abs(amount));
+  try {
+    return new Intl.NumberFormat(bcp, {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: 2,
+    }).format(Math.abs(amount));
+  } catch (error) {
+    // Keep an unexpected upstream value from taking down a transaction screen.
+    if (!(error instanceof RangeError)) throw error;
+    return `${currency} ${Math.abs(amount).toLocaleString(bcp, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
 }
 
 export function formatDate(isoDate: string): string {

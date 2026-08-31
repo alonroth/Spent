@@ -262,6 +262,37 @@ export function queryTransactions(
   };
 }
 
+/**
+ * The actionable review queue. Keep its inclusion rules in one place so the
+ * sidebar badge and the review screen can never disagree.
+ */
+export function getReviewTransactions(
+  workspaceId: number,
+): { transactions: TransactionWithCategory[]; total: number } {
+  const db = getDb();
+  const where = `WHERE t.workspace_id = ?
+    AND t.needs_review = 1
+    AND t.status = 'completed'
+    AND t.is_excluded = 0`;
+
+  const countRow = db
+    .prepare(`SELECT COUNT(*) as total FROM transactions t ${where}`)
+    .get(workspaceId) as { total: number };
+
+  const rows = db
+    .prepare(
+      `${TRANSACTION_LIST_SELECT}
+       ${where}
+       ORDER BY substr(t.date, 1, 10) DESC, t.id DESC`,
+    )
+    .all(workspaceId);
+
+  return {
+    transactions: rows.map(mapTransactionRow),
+    total: countRow.total,
+  };
+}
+
 export function getUncategorizedTransactionIds(workspaceId: number): number[] {
   const rows = getDb()
     .prepare(
