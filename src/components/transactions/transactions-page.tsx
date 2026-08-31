@@ -158,47 +158,39 @@ export function TransactionsPage() {
           })}
         </div>
 
-        <TransactionsTable
-          key={[
-            from,
-            to,
-            search,
-            categoryFilter.join(","),
-            accountFilter.join(","),
-            page,
-            kind,
-            sortField,
-            sortOrder,
-          ].join("|")}
-          transactions={transactionsQuery.data?.transactions ?? []}
-          total={transactionsQuery.data?.total ?? 0}
-          categories={categoriesQuery.data ?? []}
-          integrations={integrationsQuery.data ?? []}
-          loading={tableInitialLoading}
-          isFetching={transactionsQuery.isFetching}
-          sortField={sortField}
-          sortOrder={sortOrder}
-          onSortChange={(field) => {
-            const next = nextSortState(sortField, sortOrder, field);
-            setSortField(next.field);
-            setSortOrder(next.order);
-            setPage(0);
-          }}
-          search={search}
-          onSearchChange={setSearch}
-          categoryFilter={categoryFilter}
-          onCategoryFilterChange={(ids) => {
-            setCategoryFilter(ids);
-            setPage(0);
-          }}
-          accountFilter={accountFilter}
-          onAccountFilterChange={(ids) => {
-            setAccountFilter(ids);
-            setPage(0);
-          }}
-          page={page}
-          onPageChange={setPage}
-        />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <TransactionsTable
+            key={[from, to, search, categoryFilter.join(","), accountFilter.join(","), page, kind, sortField, sortOrder].join("|")}
+            transactions={transactionsQuery.data?.transactions ?? []}
+            total={transactionsQuery.data?.total ?? 0}
+            categories={categoriesQuery.data ?? []}
+            integrations={integrationsQuery.data ?? []}
+            loading={tableInitialLoading}
+            isFetching={transactionsQuery.isFetching}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSortChange={(field) => {
+              const next = nextSortState(sortField, sortOrder, field);
+              setSortField(next.field);
+              setSortOrder(next.order);
+              setPage(0);
+            }}
+            search={search}
+            onSearchChange={setSearch}
+            categoryFilter={categoryFilter}
+            onCategoryFilterChange={(ids) => {
+              setCategoryFilter(ids);
+              setPage(0);
+            }}
+            accountFilter={accountFilter}
+            onAccountFilterChange={(ids) => {
+              setAccountFilter(ids);
+              setPage(0);
+            }}
+            page={page}
+            onPageChange={setPage}
+          />
+        </div>
       </div>
     </>
   );
