@@ -29,10 +29,20 @@ export interface Transaction {
   credentialId: number | null;
   accountLabel: string | null;
   syncRunId: number;
+  source: "bank" | "recurring" | "deployment";
+  recurringTransactionId: number | null;
   kind: "expense" | "income" | "transfer";
   needsReview: boolean;
   createdAt: string;
   updatedAt: string;
+  deployment: {
+    deploymentId: number;
+    role: "origin" | "slice";
+    originId: number;
+    originDate: string;
+    sliceIndex: number | null;
+    totalMonths: number;
+  } | null;
 }
 
 export interface TransactionWithCategory extends Transaction {

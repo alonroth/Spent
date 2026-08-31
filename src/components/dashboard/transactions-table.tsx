@@ -37,6 +37,7 @@ import {
   Tags,
   EyeOff,
   Eye,
+  CalendarRange,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -46,6 +47,8 @@ import {
   approveTransactionCategory,
   getCategories,
   setTransactionExcluded,
+  deployExpense,
+  reverseExpenseDeployment,
 } from "@/lib/api";
 import { toast } from "sonner";
 import { translateCategoryName, translateProviderName } from "@/lib/i18n-data";
@@ -207,6 +210,23 @@ export function TransactionsTable({
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleDeployment = async (txn: TransactionWithCategory, months?: 6 | 12) => {
+    setUpdatingId(txn.id);
+    try {
+      if (months) await deployExpense(txn.id, months);
+      else await reverseExpenseDeployment(txn.id);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["summary"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["annual-table"] });
+      toast.success(months ? t("deploymentSuccess", { months }) : t("deploymentReversed"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("deploymentFailed"));
     } finally {
       setUpdatingId(null);
     }
@@ -655,6 +675,23 @@ export function TransactionsTable({
                             <MoreHorizontal className="h-4 w-4" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            {txn.deployment ? (
+                              <DropdownMenuItem onClick={() => handleDeployment(txn)}>
+                                <CalendarRange className="me-2 h-3.5 w-3.5" />
+                                {t("reverseDeployment")}
+                              </DropdownMenuItem>
+                            ) : txn.kind === "expense" && txn.status === "completed" && txn.type === "normal" && !txn.isExcluded && txn.source !== "recurring" ? (
+                              <>
+                                <DropdownMenuItem onClick={() => handleDeployment(txn, 6)}>
+                                  <CalendarRange className="me-2 h-3.5 w-3.5" />
+                                  {t("deployMonths", { months: 6 })}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDeployment(txn, 12)}>
+                                  <CalendarRange className="me-2 h-3.5 w-3.5" />
+                                  {t("deployMonths", { months: 12 })}
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
                             {otherKinds[txn.kind].map((opt) => (
                               <DropdownMenuItem
                                 key={opt.value}

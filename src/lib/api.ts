@@ -245,6 +245,16 @@ export function getTransactions(params: {
   );
 }
 
+export function deployExpense(id: number, months: 6 | 12) {
+  return fetchJSON(`/api/transactions/${id}/deployment`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ months }),
+  });
+}
+
+export function reverseExpenseDeployment(id: number) {
+  return fetchJSON<{ success: boolean }>(`/api/transactions/${id}/deployment`, { method: "DELETE" });
+}
+
 export function setTransactionKind(id: number, kind: TransactionKind) {
   return fetchJSON<{ success: boolean }>(`/api/transactions/${id}`, {
     method: "PATCH",

@@ -15,6 +15,78 @@ import {
 } from "@/lib/transaction-sort";
 export type TransactionKindFilter = "expense" | "income" | "all";
 
+export class DeploymentConflictError extends Error {}
+
+function deploymentDate(originDate: string, index: number): string {
+  const date = new Date(`${originDate.slice(0, 10)}T12:00:00Z`);
+  return `${date.getUTCFullYear() + Math.floor((date.getUTCMonth() + index) / 12)}-${String(((date.getUTCMonth() + index) % 12) + 1).padStart(2, "0")}-01`;
+}
+
+function splitMinorUnits(amount: number, months: number): number[] {
+  const sign = amount < 0 ? -1 : 1;
+  const units = Math.round(Math.abs(amount) * 100);
+  const base = Math.floor(units / months);
+  const remainder = units % months;
+  return Array.from({ length: months }, (_, index) => sign * (base + (index < remainder ? 1 : 0)) / 100);
+}
+
+export interface DeploymentMetadata {
+  deploymentId: number;
+  role: "origin" | "slice";
+  originId: number;
+  originDate: string;
+  sliceIndex: number | null;
+  totalMonths: number;
+}
+
+export function createExpenseDeployment(workspaceId: number, originId: number, months: number): DeploymentMetadata {
+  if (months !== 6 && months !== 12) throw new Error("months must be 6 or 12");
+  const db = getDb();
+  return db.transaction(() => {
+    const origin = db.prepare("SELECT * FROM transactions WHERE workspace_id = ? AND id = ?").get(workspaceId, originId) as Record<string, unknown> | undefined;
+    if (!origin) throw new Error("transaction not found");
+    if (origin.is_deployed || origin.deployment_id) throw new DeploymentConflictError("transaction is already deployed");
+    if (origin.status !== "completed" || origin.kind !== "expense" || origin.type !== "normal" || origin.is_excluded || origin.source === "recurring" || Number(origin.charged_amount) >= 0) {
+      throw new DeploymentConflictError("only visible completed normal expenses can be deployed");
+    }
+    const deploymentId = Number(db.prepare("INSERT INTO expense_deployments (workspace_id, origin_transaction_id, months, origin_date) VALUES (?, ?, ?, ?)").run(workspaceId, originId, months, String(origin.date).slice(0, 10)).lastInsertRowid);
+    const charged = splitMinorUnits(Number(origin.charged_amount), months);
+    const original = splitMinorUnits(Number(origin.original_amount), months);
+    const insert = db.prepare(`INSERT INTO transactions (
+      workspace_id, account_number, date, processed_date, original_amount, original_currency,
+      charged_amount, charged_currency, description, memo, type, status, identifier,
+      category_id, category_source, ai_confidence, provider, credential_id, sync_run_id,
+      dedup_hash, dedup_sequence, kind, needs_review, is_excluded, source,
+      deployment_id, deployment_index
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', 'completed', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'expense', 0, 0, 'bank', ?, ?)`);
+    for (let index = 0; index < months; index++) {
+      const date = deploymentDate(String(origin.date), index);
+      insert.run(workspaceId, origin.account_number, date, date, original[index], origin.original_currency,
+        charged[index], origin.charged_currency, origin.description, origin.memo,
+        `deployment:${deploymentId}:${index + 1}`, origin.category_id, origin.category_source,
+        origin.ai_confidence, origin.provider, origin.credential_id, origin.sync_run_id,
+        `deployment:${deploymentId}:${index + 1}`, deploymentId, index + 1);
+    }
+    db.prepare("UPDATE transactions SET is_deployed = 1, updated_at = datetime('now') WHERE workspace_id = ? AND id = ?").run(workspaceId, originId);
+    return { deploymentId, role: "origin" as const, originId, originDate: String(origin.date).slice(0, 10), sliceIndex: null, totalMonths: months };
+  })();
+}
+
+export function reverseExpenseDeployment(workspaceId: number, transactionId: number): void {
+  const db = getDb();
+  db.transaction(() => {
+    const row = db.prepare(`SELECT d.id, d.origin_transaction_id AS originId FROM transactions t
+      LEFT JOIN expense_deployments d ON d.id = t.deployment_id
+      WHERE t.workspace_id = ? AND t.id = ?`).get(workspaceId, transactionId) as { id: number | null; originId: number | null } | undefined;
+    const own = db.prepare("SELECT id, origin_transaction_id AS originId FROM expense_deployments WHERE workspace_id = ? AND origin_transaction_id = ?").get(workspaceId, transactionId) as { id: number; originId: number } | undefined;
+    const deployment = own ?? (row?.id ? { id: row.id, originId: row.originId! } : undefined);
+    if (!deployment) throw new Error("deployment not found");
+    db.prepare("DELETE FROM transactions WHERE workspace_id = ? AND deployment_id = ?").run(workspaceId, deployment.id);
+    db.prepare("UPDATE transactions SET is_deployed = 0, updated_at = datetime('now') WHERE workspace_id = ? AND id = ?").run(workspaceId, deployment.originId);
+    db.prepare("DELETE FROM expense_deployments WHERE workspace_id = ? AND id = ?").run(workspaceId, deployment.id);
+  })();
+}
+
 interface RawTransaction {
   accountNumber: string;
   date: string;
@@ -182,11 +254,15 @@ function resolveSortSql(sort: string | undefined): string {
 const TRANSACTION_LIST_FROM = `
   FROM transactions t
   LEFT JOIN categories c ON t.category_id = c.id
-  LEFT JOIN bank_credentials bc ON t.credential_id = bc.id`;
+  LEFT JOIN bank_credentials bc ON t.credential_id = bc.id
+  LEFT JOIN expense_deployments d ON d.workspace_id = t.workspace_id
+    AND (d.id = t.deployment_id OR d.origin_transaction_id = t.id)`;
 
 const TRANSACTION_LIST_SELECT = `
   SELECT t.*, c.name AS category_name, c.color AS category_color,
-         bc.label AS account_label
+         bc.label AS account_label, d.id AS deployment_meta_id,
+         d.origin_transaction_id AS deployment_origin_id, d.origin_date AS deployment_origin_date,
+         d.months AS deployment_months
   ${TRANSACTION_LIST_FROM}`;
 
 export function queryTransactions(
@@ -522,7 +598,8 @@ export function getPeriodTotal(
       `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total
        FROM transactions
        WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense'
-         AND is_excluded = 0`
+         AND is_excluded = 0
+         AND is_deployed = 0`
     )
     .get(workspaceId, from, to) as { total: number };
   return row.total;
@@ -538,7 +615,8 @@ export function getPeriodCount(
       `SELECT COUNT(*) as count
        FROM transactions
        WHERE workspace_id = ? AND date >= ? AND date <= ? AND status = 'completed' AND kind = 'expense'
-         AND is_excluded = 0`
+         AND is_excluded = 0
+         AND is_deployed = 0`
     )
     .get(workspaceId, from, to) as { count: number };
   return row.count;
@@ -566,6 +644,15 @@ interface TransactionRow {
   provider: string;
   credential_id: number | null;
   sync_run_id: number;
+  source: string;
+  recurring_transaction_id: number | null;
+  deployment_id: number | null;
+  deployment_index: number | null;
+  is_deployed: number;
+  deployment_meta_id?: number | null;
+  deployment_origin_id?: number | null;
+  deployment_origin_date?: string | null;
+  deployment_months?: number | null;
   kind: string;
   needs_review: number;
   is_excluded: number;
@@ -601,6 +688,8 @@ function mapTransactionRow(row: unknown): TransactionWithCategory {
     credentialId: r.credential_id ?? null,
     accountLabel: r.account_label ?? null,
     syncRunId: r.sync_run_id,
+    source: r.deployment_id != null ? "deployment" : (r.source ?? "bank") as "bank" | "recurring" | "deployment",
+    recurringTransactionId: r.recurring_transaction_id ?? null,
     kind: r.kind as "expense" | "income" | "transfer",
     needsReview: r.needs_review === 1,
     isExcluded: r.is_excluded === 1,
@@ -608,6 +697,14 @@ function mapTransactionRow(row: unknown): TransactionWithCategory {
     updatedAt: r.updated_at,
     categoryName: r.category_name ?? null,
     categoryColor: r.category_color ?? null,
+    deployment: r.deployment_meta_id != null ? {
+      deploymentId: r.deployment_meta_id,
+      role: r.is_deployed === 1 ? "origin" : "slice",
+      originId: r.deployment_origin_id!,
+      originDate: r.deployment_origin_date!,
+      sliceIndex: r.deployment_index,
+      totalMonths: r.deployment_months!,
+    } : null,
   };
 }
 

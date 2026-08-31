@@ -392,7 +392,7 @@ export function deleteCategory(
 
   const txnCountRow = db
     .prepare(
-      "SELECT COUNT(*) as count FROM transactions WHERE workspace_id = ? AND category_id = ?"
+      "SELECT COUNT(*) as count FROM transactions WHERE workspace_id = ? AND category_id = ? AND is_deployed = 0"
     )
     .get(workspaceId, categoryId) as { count: number };
 
