@@ -11,6 +11,7 @@ import type {
   Workspace,
   HomePayload,
   ActivitySnapshot,
+  RecurringTransaction,
 } from "./types";
 import { getActiveWorkspaceIdSync } from "./workspace-store";
 
@@ -23,6 +24,28 @@ function withWorkspaceHeader(init?: RequestInit): RequestInit {
     headers.set("x-workspace-id", String(wsId));
   }
   return { ...init, headers };
+}
+
+export function getRecurringTransactions() {
+  return fetchJSON<RecurringTransaction[]>("/api/recurring-transactions");
+}
+
+type RecurringInput = Omit<RecurringTransaction, "id" | "active" | "createdAt" | "updatedAt"> & { active?: boolean };
+
+export function createRecurringTransaction(input: RecurringInput) {
+  return fetchJSON<RecurringTransaction>("/api/recurring-transactions", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+}
+
+export function updateRecurringTransaction(id: number, input: RecurringInput) {
+  return fetchJSON<RecurringTransaction>(`/api/recurring-transactions/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+}
+
+export function deleteRecurringTransaction(id: number) {
+  return fetchJSON<{ success: boolean }>(`/api/recurring-transactions/${id}`, { method: "DELETE" });
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {

@@ -43,6 +43,19 @@ export interface TransactionWithCategory extends Transaction {
 
 export type CategoryKind = "expense" | "income";
 
+export interface RecurringTransaction {
+  id: number;
+  description: string;
+  amount: number;
+  kind: CategoryKind;
+  categoryId: number;
+  startMonth: string;
+  endMonth: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type BudgetMode = "budgeted" | "tracking";
 
 export interface Category {
