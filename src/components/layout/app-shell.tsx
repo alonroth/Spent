@@ -1,6 +1,8 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   SidebarInset,
   SidebarProvider,
@@ -12,8 +14,39 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>{children}</SidebarInset>
+      <SidebarInset>
+        {children}
+        <RemoteLogoutButton />
+      </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+function RemoteLogoutButton() {
+  const t = useTranslations("common");
+  const remote = useSyncExternalStore(
+    () => () => undefined,
+    () => window.location.protocol === "https:",
+    () => false
+  );
+
+  if (!remote) return null;
+
+  return (
+    <button
+      type="button"
+      className="fixed end-4 top-3 z-40 rounded-md border border-border/70 bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
+      onClick={async () => {
+        await fetch("/__spent/remote/logout", {
+          method: "POST",
+          credentials: "same-origin",
+        }).catch(() => undefined);
+        // The login page is served by the HTTPS boundary, outside Next's app router.
+        window.location.assign("/__spent/remote/login");
+      }}
+    >
+      {t("logout")}
+    </button>
   );
 }
 

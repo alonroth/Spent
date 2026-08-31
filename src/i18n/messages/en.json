@@ -28,7 +28,8 @@
     "months": "months",
     "day": "day",
     "days": "days",
-    "perMonth": "/ month"
+    "perMonth": "/ month",
+    "logout": "Log out"
   },
   "nav": {
     "home": "Home",
@@ -310,7 +311,8 @@
       "bank": "Bank accounts",
       "ai": "AI provider",
       "categories": "Categories",
-      "data": "Data & privacy"
+      "data": "Data & privacy",
+      "security": "Security & remote access"
     },
     "workspace": {
       "nameTitle": "Workspace name",
@@ -484,6 +486,30 @@
       "deleteEverything": "Delete everything",
       "deleteFailedFallback": "Delete failed",
       "deletedToast": "Deleted {txCount} transactions, {memoryCount} memory entries"
+    },
+    "security": {
+      "title": "Security & remote access",
+      "description": "Keep Spent loopback-only by default, or make it available to your phone on this trusted home network.",
+      "cardTitle": "Secure LAN access",
+      "cardDescription": "This starts a separate HTTPS boundary on a private Wi‑Fi address. The Next.js app remains bound to 127.0.0.1.",
+      "statusOn": "LAN access is on",
+      "statusOff": "LAN access is off",
+      "statusError": "LAN access is enabled in settings but its HTTPS boundary is not running. Restart Spent or disable and enable it again.",
+      "statusHint": "Off by default. Nothing is listening on your network until you explicitly enable it.",
+      "urlLabel": "Mobile URL",
+      "copyUrl": "Copy mobile URL",
+      "downloadCertificate": "Download the certificate for phone setup",
+      "warningTrustedNetwork": "Only use this on your trusted home network. Anyone on that network can try to reach the login page.",
+      "warningDisablePublicWifi": "Disable LAN access before connecting your computer to public Wi‑Fi. Internet/public exposure is not supported.",
+      "certificateHint": "The first phone visit requires trusting Spent’s local certificate. The setup link above downloads it; your phone may ask you to install and trust it in system settings.",
+      "passwordLabel": "Access password",
+      "passwordPlaceholder": "At least 12 characters",
+      "passwordHint": "Use a unique password. It is stored as a salted, slow PBKDF2 verifier; the password is never logged or stored.",
+      "confirmPasswordLabel": "Confirm access password",
+      "enable": "Enable LAN access",
+      "enableOrUpdate": "Enable / update password",
+      "disable": "Disable LAN access",
+      "saveFailed": "Could not update remote access"
     }
   },
   "setup": {

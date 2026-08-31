@@ -59,7 +59,7 @@ Choose Claude (Anthropic) for best accuracy, Ollama for fully local LLMs, or ski
 <td width="33%" valign="top">
 
 ### 🔒 Local-only & encrypted
-Credentials encrypted with AES-256-GCM. Server binds to `127.0.0.1` only — never reachable from your LAN or the internet.
+Credentials encrypted with AES-256-GCM. Server binds to `127.0.0.1` by default. Optional phone access uses a password-protected HTTPS boundary on a private home-network address; public exposure is unsupported.
 
 </td>
 </tr>
@@ -164,7 +164,7 @@ flowchart LR
     AI -->|category proposals| DB
     DB --> UI
 
-    subgraph local["🔒 Your machine — 127.0.0.1 only"]
+    subgraph local["🔒 Your machine — loopback by default"]
         Scraper
         DB
         UI
@@ -172,6 +172,8 @@ flowchart LR
 ```
 
 Everything inside the dashed box stays on your laptop. The only outbound traffic is to your bank (for scraping) and optionally `api.anthropic.com` (if you chose Claude) or `localhost:11434` (if you chose Ollama).
+
+To use Spent from a phone on the same trusted home Wi‑Fi, enable **Settings → Security & remote access**. This keeps Next.js on loopback and adds an authenticated HTTPS boundary only while enabled. Disable it before using public Wi‑Fi; do not port-forward it to the internet.
 
 ## Supported banks
 
@@ -289,7 +291,7 @@ If you only want to remove the always-on service but keep the menubar (so it's t
 | Concern | Defense |
 |---|---|
 | Credentials at rest | AES-256-GCM, encryption key file mode `0600` (server refuses to start otherwise) |
-| Network exposure | Bound to `127.0.0.1` only — not reachable from your LAN or the internet |
+| Network exposure | Loopback-only by default; optional authenticated HTTPS on one detected private LAN address, never public |
 | Browser CSRF | Origin / Referer validation on every mutation |
 | Bot detection | Chromium sandbox on by default (`SPENT_DISABLE_CHROMIUM_SANDBOX=1` to opt out) |
 | Bundle integrity | `israeli-bank-scrapers`, `better-sqlite3`, and `@anthropic-ai/sdk` pinned to exact versions |
