@@ -56,6 +56,31 @@ export interface RecurringTransaction {
   updatedAt: string;
 }
 
+export type AnnualTableSectionKey = "income" | "mandatory" | "optional";
+export interface AnnualTableRow {
+  categoryId: number | null;
+  name: string;
+  amounts: number[];
+  average: number;
+  outliers: Array<"high" | "low" | null>;
+  isUncategorized?: boolean;
+}
+export interface AnnualTableSection {
+  key: AnnualTableSectionKey;
+  rows: AnnualTableRow[];
+  totals: number[];
+  average: number;
+}
+export interface AnnualTablePayload {
+  year: number;
+  availableYears: number[];
+  sections: AnnualTableSection[];
+  incomeTotals: number[];
+  expenseTotals: number[];
+  netTotals: number[];
+}
+export type AnnualTableOrder = Record<"mandatory" | "optional", string[]>;
+
 export type BudgetMode = "budgeted" | "tracking";
 
 export interface Category {

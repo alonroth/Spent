@@ -12,6 +12,8 @@ import type {
   HomePayload,
   ActivitySnapshot,
   RecurringTransaction,
+  AnnualTablePayload,
+  AnnualTableOrder,
 } from "./types";
 import { getActiveWorkspaceIdSync } from "./workspace-store";
 
@@ -28,6 +30,16 @@ function withWorkspaceHeader(init?: RequestInit): RequestInit {
 
 export function getRecurringTransactions() {
   return fetchJSON<RecurringTransaction[]>("/api/recurring-transactions");
+}
+
+export function getAnnualTable(year: number) {
+  return fetchJSON<AnnualTablePayload>(`/api/table?year=${year}`);
+}
+
+export function updateAnnualTableOrder(section: "mandatory" | "optional", order: string[]) {
+  return fetchJSON<AnnualTableOrder>("/api/table/order", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section, order }),
+  });
 }
 
 type RecurringInput = Omit<RecurringTransaction, "id" | "active" | "createdAt" | "updatedAt"> & { active?: boolean };
