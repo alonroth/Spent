@@ -74,6 +74,7 @@ import type {
   Category,
   Integration,
 } from "@/lib/types";
+import type { TransactionTotals } from "@/lib/api";
 import { BANK_PROVIDERS } from "@/lib/types";
 import type { Locale } from "@/i18n/routing";
 
@@ -97,6 +98,8 @@ interface TransactionsTableProps {
   sortOrder: SortOrder;
   onSortChange: (field: TransactionSortField) => void;
   isFetching?: boolean;
+  totals?: TransactionTotals;
+  totalsLoading?: boolean;
 }
 
 const PAGE_SIZE = 50;
@@ -119,6 +122,8 @@ export function TransactionsTable({
   sortOrder,
   onSortChange,
   isFetching = false,
+  totals,
+  totalsLoading = false,
 }: TransactionsTableProps) {
   const t = useTranslations("transactions");
   const tCat = useTranslations("categoriesSeeded");
@@ -858,6 +863,25 @@ export function TransactionsTable({
                   );
                 })}
               </TableBody>
+              <tfoot className="border-t bg-muted/50 font-medium">
+                <TableRow>
+                  <TableCell colSpan={5} className="text-start">
+                    <span>{t("filteredTotal", { count: totals?.count ?? 0 })}</span>
+                    {totals && totals.count > 0 ? (
+                      <span className="ms-2 text-xs font-normal text-muted-foreground">
+                        {t("filteredBreakdown", {
+                          income: formatCurrency(totals.income, "ILS", locale),
+                          expense: formatCurrency(totals.expense, "ILS", locale),
+                        })}
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-end font-semibold tabular-nums" style={{ color: totals && totals.net >= 0 ? "var(--status-on-track)" : "var(--status-over)" }}>
+                    {totalsLoading ? <Skeleton className="ms-auto h-5 w-24" /> : formatCurrency(totals?.net ?? 0, "ILS", locale)}
+                  </TableCell>
+                  <TableCell />
+                </TableRow>
+              </tfoot>
             </Table>
 
             {totalPages > 1 && (

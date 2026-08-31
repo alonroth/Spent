@@ -201,6 +201,8 @@
     "bulkCategorySuccess": "הקטגוריה שונתה עבור {count} תנועות",
     "bulkUpdateFailed": "לא ניתן לעדכן את התנועות שנבחרו",
     "paginationRange": "{from} עד {to} מתוך {total}",
+    "filteredTotal": "סך הכול בסינון ({count} תנועות)",
+    "filteredBreakdown": "הכנסות {income} · הוצאות {expense}",
     "previous": "הקודם",
     "next": "הבא"
   },

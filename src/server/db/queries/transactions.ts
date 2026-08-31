@@ -159,6 +159,22 @@ interface QueryParams {
   credentialIds?: number[];
 }
 
+export interface TransactionTotalsParams {
+  from?: string;
+  to?: string;
+  search?: string;
+  categoryIds?: number[];
+  kind?: TransactionKindFilter;
+  credentialIds?: number[];
+}
+
+export interface TransactionTotals {
+  income: number;
+  expense: number;
+  net: number;
+  count: number;
+}
+
 function appendCredentialIdsFilter(
   conditions: string[],
   values: (string | number)[],
@@ -260,6 +276,37 @@ export function queryTransactions(
     transactions: rows.map(mapTransactionRow),
     total: countRow.total,
   };
+}
+
+export function getTransactionTotals(
+  workspaceId: number,
+  params: TransactionTotalsParams,
+): TransactionTotals {
+  const conditions: string[] = [
+    "t.workspace_id = ?",
+    "t.status = 'completed'",
+    "t.is_excluded = 0",
+  ];
+  const values: (string | number)[] = [workspaceId];
+  if (params.from) { conditions.push("substr(t.date, 1, 10) >= ?"); values.push(params.from); }
+  if (params.to) { conditions.push("substr(t.date, 1, 10) <= ?"); values.push(params.to); }
+  if (params.search) {
+    conditions.push("(t.description LIKE ? OR t.memo LIKE ?)");
+    const term = `%${params.search}%`; values.push(term, term);
+  }
+  if (params.categoryIds?.length) {
+    conditions.push(`t.category_id IN (${params.categoryIds.map(() => "?").join(",")})`);
+    values.push(...params.categoryIds);
+  }
+  if (params.kind === "income") conditions.push("t.charged_amount > 0");
+  if (params.kind === "expense") conditions.push("t.charged_amount < 0");
+  appendCredentialIdsFilter(conditions, values, params.credentialIds, "t.");
+  return getDb().prepare(`SELECT
+      COALESCE(SUM(CASE WHEN t.charged_amount > 0 THEN t.charged_amount ELSE 0 END), 0) AS income,
+      COALESCE(SUM(CASE WHEN t.charged_amount < 0 THEN ABS(t.charged_amount) ELSE 0 END), 0) AS expense,
+      COALESCE(SUM(t.charged_amount), 0) AS net,
+      COUNT(*) AS count
+    FROM transactions t WHERE ${conditions.join(" AND ")}`).get(...values) as TransactionTotals;
 }
 
 export function getUncategorizedTransactionIds(workspaceId: number): number[] {

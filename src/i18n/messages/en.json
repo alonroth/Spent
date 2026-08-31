@@ -201,6 +201,8 @@
     "bulkCategorySuccess": "Changed category for {count} transactions",
     "bulkUpdateFailed": "Could not update selected transactions",
     "paginationRange": "{from} to {to} of {total}",
+    "filteredTotal": "Filtered total ({count} transactions)",
+    "filteredBreakdown": "Income {income} · Expenses {expense}",
     "previous": "Previous",
     "next": "Next"
   },

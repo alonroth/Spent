@@ -222,6 +222,30 @@ export function getTransactions(params: {
   );
 }
 
+export interface TransactionTotals {
+  income: number;
+  expense: number;
+  net: number;
+  count: number;
+}
+
+export function getTransactionTotals(params: {
+  from?: string;
+  to?: string;
+  search?: string;
+  categoryIds?: number[];
+  kind?: TransactionKindFilter;
+  credentialIds?: number[];
+}) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined) return;
+    if (Array.isArray(value)) value.forEach((item) => searchParams.append(key, String(item)));
+    else searchParams.set(key, String(value));
+  });
+  return fetchJSON<TransactionTotals>(`/api/transactions/totals?${searchParams}`);
+}
+
 export function setTransactionKind(id: number, kind: TransactionKind) {
   return fetchJSON<{ success: boolean }>(`/api/transactions/${id}`, {
     method: "PATCH",
