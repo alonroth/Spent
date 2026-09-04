@@ -292,8 +292,8 @@ If you only want to remove the always-on service but keep the menubar (so it's t
 |---|---|
 | Credentials at rest | AES-256-GCM, encryption key file mode `0600` (server refuses to start otherwise) |
 | Network exposure | Loopback-only by default; optional authenticated HTTPS on one detected private LAN address, never public |
-| Browser CSRF | Origin / Referer validation on every mutation |
-| Bot detection | Chromium sandbox on by default (`SPENT_DISABLE_CHROMIUM_SANDBOX=1` to opt out) |
+| Browser CSRF / DNS rebinding | Explicit loopback Host checks, Fetch Metadata, and Origin / Referer validation |
+| Scraper browser isolation | Chromium sandbox and Site Isolation on by default |
 | Bundle integrity | `israeli-bank-scrapers`, `better-sqlite3`, and `@anthropic-ai/sdk` pinned to exact versions |
 | Browser hardening | Strict CSP, `X-Frame-Options: DENY`, `Permissions-Policy` locks down camera/mic/geo/payment |
 
@@ -346,7 +346,7 @@ spent/
 - **Gatekeeper blocks `Spent.app`** → right-click → Open → Open. One-time.
 - **Linux: "systemd user instance not available"** → `loginctl enable-linger $USER`.
 - **Windows: hosts edit fails / `spent.localhost` doesn't resolve** → re-run install from an elevated PowerShell (Win+X → "Terminal (Admin)") so it can edit `C:\Windows\System32\drivers\etc\hosts`. After the edit, the installer flushes the DNS cache automatically; if you edited hosts manually, run `ipconfig /flushdns`. `http://127.0.0.1:41234` always works as a fallback.
-- **Bank scrape fails with "Cloudflare"** → temporarily run with `SPENT_DISABLE_CHROMIUM_SANDBOX=1` to let Puppeteer use a real Chrome profile.
+- **Bank scrape fails with "Cloudflare"** → enable "Show browser during sync" and complete any visible challenge. Disabling the Chromium sandbox does not provide a real Chrome profile and weakens security.
 
 ## Roadmap
 

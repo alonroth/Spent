@@ -62,13 +62,19 @@ In those cases set `SPENT_DISABLE_CHROMIUM_SANDBOX=1` in your environment.
 Prefer running as a non-root user instead when you can — that keeps the
 sandbox on.
 
+Chromium Site Isolation is also left **on**. It places cross-site bank pages
+and embedded authentication frames in separate renderer processes. If a bank
+has a confirmed compatibility problem with out-of-process iframes, you can
+temporarily set `SPENT_DISABLE_SITE_ISOLATION=1`, but this weakens containment
+and should not be a routine troubleshooting step.
+
 ## CSRF defense
 
-Next.js middleware (`src/middleware.ts`) rejects any mutating API
-request (POST/PUT/PATCH/DELETE) whose `Origin` or `Referer` header
-doesn't match the app's own host. This prevents a malicious tab in
-your browser from triggering syncs / category changes against your
-localhost.
+Next.js proxy (`src/proxy.ts`) accepts API requests only for explicit loopback
+hostnames, rejects cross-site browser requests, and rejects any mutating API
+request (POST/PUT/PATCH/DELETE) whose `Origin` or `Referer` header doesn't
+match the app's own host. This blocks DNS-rebinding access and prevents a
+malicious tab from reading data or changing state through localhost.
 
 ## Optional phone access
 
@@ -218,7 +224,9 @@ entry whitelisting `127.0.0.1` and nothing else. It cannot reach the
 internet even if its code were modified to try, without re-signing the
 bundle with a different Info.plist.
 
-**Logs do not leak credentials.** macOS LaunchAgent stdout/stderr go to
+**Logs do not leak credentials.** Upstream verbose scraper logging is disabled,
+raw scraper failures are never written to the console, and displayed error
+details pass through a credential/identifier redactor. macOS LaunchAgent stdout/stderr go to
 `~/Library/Logs/Spent/{out,err}.log` (directory mode `0700`). Linux
 systemd writes to `~/.local/state/spent/log/`. The app itself already
 avoids logging credentials (see "What's protected at rest" above);
@@ -234,11 +242,10 @@ the server will fail loudly with the fix command.
 
 - A local attacker who can already run code as your user. They can read
   the DB and key file with or without the service running.
-- A malicious browser tab on your machine doing a CSRF against
-  `127.0.0.1:41234`. The same-origin middleware in
-  `src/middleware.ts` already blocks this on every mutating request,
-  and that protection works the same whether the server runs on demand
-  or always-on.
+- A malicious browser tab on your machine doing a CSRF or DNS-rebinding attack
+  against `127.0.0.1:41234`. The loopback-host and same-origin proxy in
+  `src/proxy.ts` blocks this, and that protection works the same whether the
+  server runs on demand or always-on.
 
 ## Reporting a security issue
 

@@ -2,6 +2,8 @@ import "server-only";
 
 import { CompanyTypes, createScraper } from "israeli-bank-scrapers";
 import type { ScrapeResult, ScrapedTransaction } from "./types";
+import { getChromiumLaunchOptions } from "./chromium-options";
+import { sanitizeSensitiveText } from "../lib/sanitize-sensitive";
 
 /**
  * OneZero is the only scraper in israeli-bank-scrapers that actually implements
@@ -46,12 +48,16 @@ export interface OneZeroFirstSyncResult extends ScrapeResult {
 const SCRAPER_TIMEOUT_MS = 60000;
 
 function buildScraper(startDate: Date) {
+  const chromium = getChromiumLaunchOptions();
   return createScraper({
     companyId: CompanyTypes.oneZero,
     startDate,
     combineInstallments: false,
     showBrowser: false,
+    verbose: false,
     timeout: SCRAPER_TIMEOUT_MS,
+    args: chromium.args,
+    executablePath: chromium.executablePath,
   });
 }
 
@@ -92,7 +98,9 @@ export async function scrapeOneZeroFirstTime(
       success: false,
       accounts: [],
       errorMessage:
-        trigger.errorMessage ?? "Failed to send 2FA code to your phone.",
+        trigger.errorMessage
+          ? sanitizeSensitiveText(trigger.errorMessage)
+          : "Failed to send 2FA code to your phone.",
     };
   }
 
@@ -104,7 +112,9 @@ export async function scrapeOneZeroFirstTime(
       success: false,
       accounts: [],
       errorMessage:
-        err instanceof Error ? err.message : "OTP entry was cancelled.",
+        err instanceof Error
+          ? sanitizeSensitiveText(err)
+          : "OTP entry was cancelled.",
     };
   }
   opts.onOtpSubmitted?.();
@@ -115,8 +125,9 @@ export async function scrapeOneZeroFirstTime(
       success: false,
       accounts: [],
       errorMessage:
-        tokenResult.errorMessage ??
-        "The one-time code was rejected by One Zero.",
+        tokenResult.errorMessage
+          ? sanitizeSensitiveText(tokenResult.errorMessage)
+          : "The one-time code was rejected by One Zero.",
     };
   }
 
@@ -132,7 +143,9 @@ export async function scrapeOneZeroFirstTime(
     return {
       success: false,
       accounts: [],
-      errorMessage: scrapeResult.errorMessage ?? "Scrape failed after login.",
+      errorMessage: scrapeResult.errorMessage
+        ? sanitizeSensitiveText(scrapeResult.errorMessage)
+        : "Scrape failed after login.",
       otpLongTermToken: longTermToken,
     };
   }
@@ -158,7 +171,9 @@ export async function scrapeOneZeroWithToken(
     return {
       success: false,
       accounts: [],
-      errorMessage: scrapeResult.errorMessage ?? "Scrape failed.",
+      errorMessage: scrapeResult.errorMessage
+        ? sanitizeSensitiveText(scrapeResult.errorMessage)
+        : "Scrape failed.",
     };
   }
 

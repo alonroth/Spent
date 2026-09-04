@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   deleteBankCredentials,
-  getBankCredentials,
   getBankCredentialMeta,
-  getRequiresManualTwoFactor,
   setRequiresManualTwoFactor,
   updateCredentialField,
 } from "@/server/db/queries/bank-credentials";
@@ -37,28 +35,15 @@ export async function GET(
     });
   }
 
-  const credentials = getBankCredentials(workspaceId, credentialId);
-  if (!credentials) {
-    return NextResponse.json({
-      credentials: null,
-      label: meta.label,
-      provider: meta.provider,
-      requiresManualTwoFactor: false,
-      hasTwoFactorToken: false,
-    });
-  }
-
-  const { otpLongTermToken, ...userFacing } = credentials;
-
   return NextResponse.json({
-    credentials: userFacing,
+    // Credential values are deliberately write-only. Returning even one field
+    // requires decrypting the whole object and makes passwords available to
+    // browser JavaScript. Empty fields in an edit request retain saved values.
+    credentials: {},
     label: meta.label,
     provider: meta.provider,
-    requiresManualTwoFactor: getRequiresManualTwoFactor(
-      workspaceId,
-      credentialId
-    ),
-    hasTwoFactorToken: Boolean(otpLongTermToken),
+    requiresManualTwoFactor: meta.requiresManualTwoFactor,
+    hasTwoFactorToken: meta.hasTwoFactorToken,
   });
 }
 

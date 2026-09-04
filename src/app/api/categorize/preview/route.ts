@@ -11,6 +11,7 @@ import { getAppSettings } from "@/server/db/queries/settings";
 import type { CategoryMapping } from "@/server/ai/types";
 import type { CategoryKind } from "@/lib/types";
 import { getWorkspaceIdFromRequest } from "@/server/lib/workspace-context";
+import { sanitizeSensitiveText } from "@/server/lib/sanitize-sensitive";
 
 /**
  * Preview mode: run AI categorization with proposal-enabled prompt, split by
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
           });
         }
       } catch (err) {
-        errors.push(err instanceof Error ? err.message : "Unknown AI error");
+        errors.push(sanitizeSensitiveText(err));
       }
     }
   }

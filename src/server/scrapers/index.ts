@@ -4,6 +4,8 @@ import { CompanyTypes, createScraper } from "israeli-bank-scrapers";
 import type { ScrapeResult, ScrapedTransaction } from "./types";
 import type { BankProvider } from "@/lib/types";
 import { getWorkspaceSetting } from "../db/queries/settings";
+import { sanitizeSensitiveText } from "../lib/sanitize-sensitive";
+import { getChromiumLaunchOptions } from "./chromium-options";
 
 export const PROVIDER_MAP: Record<string, CompanyTypes> = {
   isracard: CompanyTypes.isracard,
@@ -27,23 +29,10 @@ export const PROVIDER_MAP: Record<string, CompanyTypes> = {
 };
 
 function sanitizeError(error: unknown): string {
-  if (!(error instanceof Error)) {
+  if (!(error instanceof Error) && typeof error !== "string") {
     return "An unknown error occurred during scraping";
   }
-  let msg = error.message;
-  // Strip 5+ digit numbers (likely ID numbers, card digits, etc.)
-  msg = msg.replace(/\b\d{5,}\b/g, "[REDACTED]");
-  // Strip password and id values from JSON-like blobs.
-  // Match a key followed by quoted string OR unquoted value, non-greedy.
-  msg = msg.replace(
-    /"(password|id|card6Digits|cardSuffix)"\s*:\s*"[^"]*"/gi,
-    '"$1":"[REDACTED]"'
-  );
-  msg = msg.replace(
-    /\b(password|id|card6Digits|cardSuffix)\s*=\s*\S+/gi,
-    "$1=[REDACTED]"
-  );
-  return msg;
+  return sanitizeSensitiveText(error);
 }
 
 /**
@@ -147,27 +136,19 @@ async function runScrape(
     };
   }
 
-  const chromiumArgs = [
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-  ];
-  // Chromium's renderer sandbox is on by default on macOS, Windows, and
-  // most Linux installs. Self-hosters running as root or in unprivileged
-  // Docker need to opt out (the sandbox fails to start there).
-  if (process.env.SPENT_DISABLE_CHROMIUM_SANDBOX === "1") {
-    chromiumArgs.push("--no-sandbox");
-  }
+  const chromium = getChromiumLaunchOptions();
 
   const scraper = createScraper({
     companyId,
     startDate,
     combineInstallments: false,
     showBrowser,
-    // Verbose logs include URLs and posted payloads (incl. credentials).
-    // Only enable when the user is also showing the browser (= they're debugging).
-    verbose: showBrowser,
+    // Upstream verbose output can contain transaction and request details.
+    // Showing the browser must never implicitly enable credential-bearing logs.
+    verbose: false,
     timeout: 60000,
-    args: chromiumArgs,
+    args: chromium.args,
+    executablePath: chromium.executablePath,
   });
 
   // credentials shape varies by provider; the library accepts different types per bank
@@ -177,10 +158,12 @@ async function runScrape(
 
   if (!result.success) {
     const errorType = result.errorType ?? "GENERIC";
-    console.error(`[scraper] failed (${errorType}):`, result.errorMessage);
+    // Do not log the upstream message. Some scraper errors embed the complete
+    // login POST body, including provider-specific password field names.
+    console.error(`[scraper] failed (${errorType})`);
     const friendly = FRIENDLY_ERRORS[errorType];
     const detail = result.errorMessage
-      ? sanitizeError(new Error(result.errorMessage))
+      ? sanitizeError(result.errorMessage)
       : errorType;
     return {
       success: false,

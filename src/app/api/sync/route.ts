@@ -9,6 +9,7 @@ import {
 } from "@/server/lib/workspace-context";
 import { cancelOtpRequest } from "@/server/sync/otp-bridge";
 import { markSyncEnd, markSyncStart } from "@/server/sync/activity";
+import { sanitizeSensitiveText } from "@/server/lib/sanitize-sensitive";
 
 function sseEvent(
   event: string,
@@ -97,11 +98,8 @@ export async function POST(request: Request) {
           });
         }
       } catch (error) {
-        console.error("[sync] unexpected error in sync route:", error);
-        const message =
-          error instanceof Error
-            ? error.message.replace(/\b\d{5,}\b/g, "[REDACTED]")
-            : "An unexpected error occurred";
+        const message = sanitizeSensitiveText(error);
+        console.error("[sync] unexpected error in sync route:", message);
         send("error", { message });
       } finally {
         if (headerPathTracking) markSyncEnd();

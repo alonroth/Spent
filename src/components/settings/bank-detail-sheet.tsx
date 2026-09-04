@@ -164,10 +164,6 @@ function CredentialsForm({
   } | null>(null);
 
   useEffect(() => {
-    setSavedCredentialId(credentialId);
-  }, [credentialId]);
-
-  useEffect(() => {
     if (!isEdit || credentialId == null) return;
     let cancelled = false;
     (async () => {
@@ -191,7 +187,7 @@ function CredentialsForm({
     label.trim().length > 0 &&
     info.credentialFields.every((f) => {
       const v = credentials[f.key]?.trim() ?? "";
-      if (!v) return false;
+      if (!v) return isEdit;
       if (f.exactLength != null && v.length !== f.exactLength) return false;
       return true;
     });
@@ -318,14 +314,21 @@ function CredentialsForm({
           field.exactLength != null &&
           value.length > 0 &&
           value.length !== field.exactLength;
-        const placeholder = field.placeholder ?? field.label;
-        const hint = field.hint;
+        const placeholder = isEdit
+          ? "Saved — leave blank to keep unchanged"
+          : field.placeholder ?? field.label;
+        const hint = isEdit
+          ? [field.hint, "Enter a value only to replace the saved one."]
+              .filter(Boolean)
+              .join(" ")
+          : field.hint;
         return (
           <div key={field.key} className="space-y-1.5">
             <Label htmlFor={`${info.id}-${field.key}`}>{field.label}</Label>
             <Input
               id={`${info.id}-${field.key}`}
               type={field.type}
+              autoComplete={field.type === "password" ? "new-password" : "off"}
               inputMode={field.numeric ? "numeric" : undefined}
               pattern={field.numeric ? "[0-9]*" : undefined}
               maxLength={field.maxLength ?? field.exactLength ?? undefined}

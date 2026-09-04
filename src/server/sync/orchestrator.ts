@@ -40,6 +40,7 @@ import {
 import { createAIProvider } from "@/server/ai/factory";
 import { ensureOllamaRunning } from "@/server/ai/ollama-manager";
 import { toLocalISODate } from "@/server/lib/date-utils";
+import { sanitizeSensitiveText } from "@/server/lib/sanitize-sensitive";
 import { listAllWorkspaceIds } from "@/server/lib/workspace-context";
 import { getWorkspace } from "@/server/db/queries/workspaces";
 import { BANK_PROVIDERS, type BankProvider, type SyncKind } from "@/lib/types";
@@ -392,10 +393,7 @@ export async function syncWorkspace(
         errorMessage: result.errorMessage,
       });
     } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message.replace(/\b\d{5,}\b/g, "[REDACTED]")
-          : "Unknown scrape error";
+      const message = sanitizeSensitiveText(err);
       results.push({
         provider,
         credentialId: meta.id,

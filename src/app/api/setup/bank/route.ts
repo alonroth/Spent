@@ -18,7 +18,12 @@ export async function POST(request: Request) {
     requiresManualTwoFactor?: boolean;
   };
 
-  if (!body.provider || !body.credentials) {
+  if (
+    !body.provider ||
+    !body.credentials ||
+    typeof body.credentials !== "object" ||
+    Array.isArray(body.credentials)
+  ) {
     return NextResponse.json(
       { success: false, message: "Missing provider or credentials" },
       { status: 400 }
@@ -26,35 +31,50 @@ export async function POST(request: Request) {
   }
 
   const info = BANK_PROVIDERS.find((b) => b.id === body.provider);
-  const passwordKeys =
-    info?.credentialFields.filter((f) => f.type === "password").map((f) => f.key) ?? [];
-
-  const credentialId = body.credentialId;
-  const existing =
-    credentialId != null
-      ? getBankCredentials(workspaceId, credentialId)
-      : null;
-
-  if (credentialId != null && !getBankCredentialMeta(workspaceId, credentialId)) {
+  if (!info) {
     return NextResponse.json(
-      { success: false, message: "Credential not found" },
-      { status: 404 }
+      { success: false, message: "Unsupported provider" },
+      { status: 400 }
     );
   }
 
-  const merged: Record<string, string> = { ...body.credentials };
-  for (const key of passwordKeys) {
-    if (!merged[key] || merged[key].trim() === "") {
-      if (existing && existing[key]) {
-        merged[key] = existing[key];
-      }
+  const credentialId = body.credentialId;
+  const existingMeta =
+    credentialId != null
+      ? getBankCredentialMeta(workspaceId, credentialId)
+      : null;
+  if (credentialId != null) {
+    if (!existingMeta) {
+      return NextResponse.json(
+        { success: false, message: "Credential not found" },
+        { status: 404 }
+      );
+    }
+    if (existingMeta.provider !== body.provider) {
+      return NextResponse.json(
+        { success: false, message: "Credential provider mismatch" },
+        { status: 400 }
+      );
     }
   }
 
-  for (const key of passwordKeys) {
-    if (!merged[key]) {
+  const existing = existingMeta
+    ? getBankCredentials(workspaceId, existingMeta.id)
+    : null;
+  const merged: Record<string, string> = {};
+
+  // Every credential field is write-only. On edit, an omitted/blank field
+  // retains its encrypted saved value; only explicit non-empty replacements
+  // are written.
+  for (const field of info.credentialFields) {
+    const supplied = body.credentials[field.key];
+    if (typeof supplied === "string" && supplied.trim() !== "") {
+      merged[field.key] = supplied;
+    } else if (existing?.[field.key]) {
+      merged[field.key] = existing[field.key];
+    } else {
       return NextResponse.json(
-        { success: false, message: `Missing required field: ${key}` },
+        { success: false, message: `Missing required field: ${field.key}` },
         { status: 400 }
       );
     }
@@ -66,9 +86,7 @@ export async function POST(request: Request) {
 
   const label =
     body.label?.trim() ||
-    (credentialId != null
-      ? getBankCredentialMeta(workspaceId, credentialId)?.label
-      : defaultLabelForProvider(workspaceId, body.provider)) ||
+    existingMeta?.label ||
     defaultLabelForProvider(workspaceId, body.provider);
 
   try {
