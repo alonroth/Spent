@@ -8,12 +8,8 @@ import { addManagedBlock, removeManagedBlock } from "./hosts.mjs";
 const LABEL = "com.spent.app";
 const PLIST_PATH = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 const LOG_DIR = path.join(os.homedir(), "Library", "Logs", "Spent");
-
-function whichNode() {
-  const r = spawnSync("which", ["node"], { encoding: "utf-8" });
-  if (r.status !== 0) throw new Error("Cannot find `node` on PATH.");
-  return r.stdout.trim();
-}
+const DATA_DIR = path.join(REPO_ROOT, "data");
+const LSOF_PATH = fs.existsSync("/usr/sbin/lsof") ? "/usr/sbin/lsof" : "lsof";
 
 function ensureLogDir() {
   fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -25,11 +21,14 @@ function ensureLogDir() {
 }
 
 function writePlist() {
-  const nodePath = whichNode();
-  const pathEnv = `${path.dirname(nodePath)}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`;
+  // Native dependencies such as better-sqlite3 are ABI-specific. Pin the
+  // service to the exact Node executable that is running this installer.
+  const nodePath = process.execPath;
+  const pathEnv = `${path.dirname(nodePath)}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
   const content = renderTemplate("com.spent.app.plist", {
     nodePath,
     repoRoot: REPO_ROOT,
+    dataDir: DATA_DIR,
     port: PORT,
     pathEnv,
     logDir: LOG_DIR,
@@ -47,7 +46,7 @@ function launchctl(args, opts = {}) {
 
 function bootstrap() {
   const uid = process.getuid();
-  return launchctl(["bootstrap", `gui/${uid}`, PLIST_PATH], { stdio: "inherit" });
+  return launchctl(["bootstrap", `gui/${uid}`, PLIST_PATH]);
 }
 
 function bootout() {
@@ -60,9 +59,24 @@ function kickstart() {
   return launchctl(["kickstart", "-k", `gui/${uid}/${LABEL}`]);
 }
 
+function launchctlDetail(result) {
+  return (result.stderr || result.stdout || "").trim();
+}
+
+function assertLaunchctlSuccess(action, result) {
+  if (result.status === 0) return;
+  const detail = launchctlDetail(result);
+  throw new Error(`${action} failed${detail ? `: ${detail}` : "."}`);
+}
+
+function isLoaded() {
+  const uid = process.getuid();
+  return launchctl(["print", `gui/${uid}/${LABEL}`]).status === 0;
+}
+
 function checkPortBinding() {
   const r = spawnSync(
-    "lsof",
+    LSOF_PATH,
     ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"],
     { encoding: "utf-8" },
   );
@@ -76,11 +90,40 @@ function checkPortBinding() {
 }
 
 function preflight() {
-  if (!fs.existsSync(path.join(REPO_ROOT, ".next"))) {
-    console.warn(
-      "WARNING: .next/ not found. Run `npm run build` before installing the service.",
+  if (!fs.existsSync(path.join(REPO_ROOT, ".next", "BUILD_ID"))) {
+    throw new Error(
+      "Production build not found. Run `npm run build` before starting the service.",
     );
   }
+
+  const nativeCheck = spawnSync(
+    process.execPath,
+    ["-e", "require('better-sqlite3')"],
+    { cwd: REPO_ROOT, encoding: "utf-8" },
+  );
+  if (nativeCheck.status !== 0) {
+    throw new Error(
+      "Native dependencies do not match this Node.js runtime. " +
+        "Run `npm rebuild better-sqlite3`, then start the service again.",
+    );
+  }
+}
+
+async function verifyStarted() {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const state = checkPortBinding();
+    if (state.onWildcard) {
+      throw new Error(
+        `DANGER: server is bound to a wildcard address on :${PORT}. Stop the service immediately.`,
+      );
+    }
+    if (state.onLoopback) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(
+    `Spent did not bind to 127.0.0.1:${PORT} within 30 seconds. Check ${LOG_DIR}/err.log.`,
+  );
 }
 
 export async function run(cmd, { friendlyUrl, loopbackUrl }) {
@@ -95,25 +138,10 @@ export async function run(cmd, { friendlyUrl, loopbackUrl }) {
         console.error(`Hosts file edit failed: ${err.message}`);
         console.error("Service file is still installed. You can fix hosts later.");
       }
-      bootstrap();
-
-      setTimeout(() => {
-        const state = checkPortBinding();
-        if (state.onWildcard) {
-          console.error(
-            `DANGER: server is bound to wildcard address on :${PORT}. ` +
-              `Inspect the plist at ${PLIST_PATH} and remove the service immediately.`,
-          );
-          process.exit(1);
-        }
-        if (state.onLoopback) {
-          console.log(`Spent is running. Open ${friendlyUrl} or ${loopbackUrl}.`);
-        } else {
-          console.log(
-            `Service installed. Check status: npm run service:status`,
-          );
-        }
-      }, 1500);
+      const result = isLoaded() ? kickstart() : bootstrap();
+      assertLaunchctlSuccess("Installing Spent service", result);
+      await verifyStarted();
+      console.log(`Spent is running. Open ${friendlyUrl} or ${loopbackUrl}.`);
       return;
     }
     case "uninstall": {
@@ -128,15 +156,19 @@ export async function run(cmd, { friendlyUrl, loopbackUrl }) {
       return;
     }
     case "start": {
-      const r = bootstrap();
-      if (r.status !== 0 && r.stderr?.includes("already loaded")) {
-        kickstart();
-      }
+      preflight();
+      ensureLogDir();
+      writePlist();
+      const result = isLoaded() ? kickstart() : bootstrap();
+      assertLaunchctlSuccess("Starting Spent", result);
+      await verifyStarted();
       console.log("Spent started.");
       return;
     }
     case "stop": {
-      bootout();
+      if (isLoaded()) {
+        assertLaunchctlSuccess("Stopping Spent", bootout());
+      }
       console.log("Spent stopped.");
       return;
     }

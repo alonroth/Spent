@@ -25,6 +25,8 @@
         <string>production</string>
         <key>PATH</key>
         <string>{{pathEnv}}</string>
+        <key>SPENT_DATA_DIR</key>
+        <string>{{dataDir}}</string>
     </dict>
 
     <key>RunAtLoad</key>
