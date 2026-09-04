@@ -37,16 +37,16 @@ interface NavDef {
 
 const NAV: NavDef[] = [
   {
-    href: "/table",
-    labelKey: "table",
-    Icon: TableProperties,
-    match: (p: string) => p.startsWith("/table"),
-  },
-  {
     href: "/",
     labelKey: "home",
     Icon: LayoutDashboard,
     match: (p: string) => p === "/",
+  },
+  {
+    href: "/table",
+    labelKey: "table",
+    Icon: TableProperties,
+    match: (p: string) => p.startsWith("/table"),
   },
   {
     href: "/budget",
@@ -210,4 +210,3 @@ function ReviewBadge({ count }: { count: number }) {
     </span>
   );
 }
-
