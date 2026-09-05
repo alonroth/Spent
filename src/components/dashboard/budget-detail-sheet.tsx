@@ -65,6 +65,7 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
 import { Switch } from "@/components/ui/switch";
 import type { Category, TransactionWithCategory } from "@/lib/types";
 import type { CategoryChildBreakdown } from "@/lib/api";
+import { DeploymentIndicator } from "@/components/transactions/deployment-indicator";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   "shopping-basket": ShoppingBasket,
@@ -415,6 +416,7 @@ function DetailContent({ data }: { data: CategoryDetail }) {
                       <div className="text-xs text-muted-foreground tabular-nums">
                         {formatDate(t.date)}
                       </div>
+                      <DeploymentIndicator deployment={t.deployment} className="block" />
                     </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
@@ -573,6 +575,7 @@ function NeedsReviewSection({
               <div className="text-xs text-muted-foreground tabular-nums">
                 {formatDate(t.date)} · {formatCurrency(t.chargedAmount)}
               </div>
+              <DeploymentIndicator deployment={t.deployment} className="block" />
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <DropdownMenu>
@@ -780,4 +783,3 @@ function parseHex(hex: string): { r: number; g: number; b: number } {
     b: parseInt(clean.slice(4, 6), 16),
   };
 }
-

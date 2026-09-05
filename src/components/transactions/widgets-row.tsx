@@ -9,6 +9,7 @@ import { previewCategorize } from "@/lib/api";
 import type { CategorizePreview, TransactionsSummary } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
 import { CategorizeReviewDialog } from "@/components/dashboard/categorize-review-dialog";
+import { DeploymentIndicator } from "@/components/transactions/deployment-indicator";
 import type { Locale } from "@/i18n/routing";
 
 interface WidgetsRowProps {
@@ -239,8 +240,9 @@ function OutlierRow({
         <div className="mt-0.5 text-sm text-muted-foreground">—</div>
       ) : (
         <div className="mt-0.5 flex items-baseline justify-between gap-3">
-          <div className="min-w-0 truncate text-sm font-medium">
-            {txn.description}
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{txn.description}</div>
+            <DeploymentIndicator deployment={txn.deployment} className="block" />
           </div>
           <div
             className="shrink-0 font-serif text-base tabular-nums"

@@ -88,9 +88,14 @@ export function getRecentTransactionsForHome(
     .prepare(
       `SELECT t.id, t.date, t.description, t.charged_amount as chargedAmount,
               t.charged_currency as chargedCurrency, t.kind,
-              c.name as categoryName, c.color as categoryColor
+              c.name as categoryName, c.color as categoryColor,
+              d.id as deploymentId, d.origin_transaction_id as deploymentOriginId,
+              d.origin_date as deploymentOriginDate, d.months as deploymentMonths,
+              t.deployment_index as deploymentIndex, t.is_deployed as isDeployed
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
+       LEFT JOIN expense_deployments d ON d.workspace_id = t.workspace_id
+         AND (d.id = t.deployment_id OR d.origin_transaction_id = t.id)
        WHERE t.workspace_id = ? AND t.status = 'completed' AND t.kind != 'transfer'
          AND t.is_excluded = 0
        ORDER BY t.date DESC, t.id DESC
@@ -105,8 +110,24 @@ export function getRecentTransactionsForHome(
     kind: "expense" | "income" | "transfer";
     categoryName: string | null;
     categoryColor: string | null;
+    deploymentId: number | null;
+    deploymentOriginId: number | null;
+    deploymentOriginDate: string | null;
+    deploymentMonths: number | null;
+    deploymentIndex: number | null;
+    isDeployed: number;
   }>;
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    deployment: row.deploymentId == null ? null : {
+      deploymentId: row.deploymentId,
+      role: row.isDeployed === 1 ? "origin" : "slice",
+      originId: row.deploymentOriginId!,
+      originDate: row.deploymentOriginDate!,
+      sliceIndex: row.deploymentIndex,
+      totalMonths: row.deploymentMonths!,
+    },
+  }));
 }
 
 export function getNeedsAttentionCounts(

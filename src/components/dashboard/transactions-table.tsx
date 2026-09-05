@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -78,6 +77,7 @@ import { SortableTableHead } from "@/components/transactions/sortable-table-head
 import type { SortOrder, TransactionSortField } from "@/lib/transaction-sort";
 import { cn } from "@/lib/utils";
 import { ProviderBadge } from "@/components/setup/provider-badge";
+import { DeploymentIndicator } from "@/components/transactions/deployment-indicator";
 import type {
   TransactionWithCategory,
   Category,
@@ -687,17 +687,7 @@ export function TransactionsTable({
                               )}
                             </span>
                           )}
-                          {txn.deployment && (
-                            txn.deployment.role === "slice" ? (
-                            <Link href={`/transactions?month=${txn.deployment.originDate.slice(0, 7)}&focus=${txn.deployment.originId}`} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
-                              {t("deploymentMonth", { n: txn.deployment.sliceIndex ?? 0, total: txn.deployment.totalMonths })}
-                            </Link>
-                            ) : <span className="text-xs text-muted-foreground">
-                              {txn.deployment.role === "origin"
-                                ? t("deployedAcross", { months: txn.deployment.totalMonths })
-                                : t("deploymentMonth", { n: txn.deployment.sliceIndex ?? 0, total: txn.deployment.totalMonths })}
-                            </span>
-                          )}
+                          <DeploymentIndicator deployment={txn.deployment} />
                         </div>
                         {txn.memo && (
                           <div className="text-xs text-muted-foreground">
@@ -943,4 +933,3 @@ export function TransactionsTable({
     </Card>
   );
 }
-

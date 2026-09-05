@@ -6,6 +6,15 @@ export interface Workspace {
   updatedAt: string;
 }
 
+export interface TransactionDeployment {
+  deploymentId: number;
+  role: "origin" | "slice";
+  originId: number;
+  originDate: string;
+  sliceIndex: number | null;
+  totalMonths: number;
+}
+
 export interface Transaction {
   id: number;
   accountNumber: string;
@@ -35,14 +44,7 @@ export interface Transaction {
   needsReview: boolean;
   createdAt: string;
   updatedAt: string;
-  deployment: {
-    deploymentId: number;
-    role: "origin" | "slice";
-    originId: number;
-    originDate: string;
-    sliceIndex: number | null;
-    totalMonths: number;
-  } | null;
+  deployment: TransactionDeployment | null;
 }
 
 export interface TransactionWithCategory extends Transaction {
@@ -264,6 +266,7 @@ export interface HomeRecentTransaction {
   kind: "expense" | "income" | "transfer";
   categoryName: string | null;
   categoryColor: string | null;
+  deployment: TransactionDeployment | null;
 }
 
 export interface HomeTopMerchant {
@@ -799,4 +802,3 @@ export interface ExcludedMerchant {
   merchantKey: string;
   createdAt: string;
 }
-

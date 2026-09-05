@@ -6,6 +6,7 @@ import { CardShell, CardAction } from "./card-shell";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { translateCategoryName } from "@/lib/i18n-data";
 import type { HomeRecentTransaction } from "@/lib/types";
+import { DeploymentIndicator } from "@/components/transactions/deployment-indicator";
 
 interface Props {
   items: HomeRecentTransaction[];
@@ -33,7 +34,7 @@ export function RecentTransactionsCard({ items }: Props) {
         {items.map((txn) => (
           <li key={txn.id}>
             <Link
-              href="/transactions"
+              href={transactionHref(txn)}
               className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/40"
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -44,6 +45,11 @@ export function RecentTransactionsCard({ items }: Props) {
                   <div className="truncate text-sm font-medium">
                     {txn.description}
                   </div>
+                  <DeploymentIndicator
+                    deployment={txn.deployment}
+                    linkToOrigin={false}
+                    className="block"
+                  />
                   {txn.categoryName ? (
                     <CategoryBadge
                       name={translateCategoryName(txn.categoryName, tCat)}
@@ -72,6 +78,13 @@ export function RecentTransactionsCard({ items }: Props) {
       </ul>
     </CardShell>
   );
+}
+
+function transactionHref(txn: HomeRecentTransaction): string {
+  const target = txn.deployment?.role === "slice"
+    ? { month: txn.deployment.originDate.slice(0, 7), focus: txn.deployment.originId }
+    : { month: txn.date.slice(0, 7), focus: txn.id };
+  return `/transactions?month=${target.month}&focus=${target.focus}`;
 }
 
 function CategoryBadge({
