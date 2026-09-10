@@ -29,7 +29,7 @@ import {
   updateAnnualTableOrder,
   updateRecurringTransaction,
 } from "@/lib/api";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, getMonthRange } from "@/lib/formatters";
 import type {
   AnnualTablePayload,
   AnnualTableRow,
@@ -102,7 +102,25 @@ function AnnualGrid({ data }: { data: AnnualTablePayload }) {
   const [col, setCol] = useState<number | null>(null);
   const [sections, setSections] = useState(data.sections);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [selection, setSelection] = useState<{
+    categoryId: number;
+    from: string;
+    to: string;
+  } | null>(null);
+  const openCategory = (categoryId: number, monthIndex?: number) => {
+    if (monthIndex === undefined) {
+      setSelection({
+        categoryId,
+        from: `${data.year}-01-01`,
+        to: `${data.year}-12-31`,
+      });
+      return;
+    }
+    setSelection({
+      categoryId,
+      ...getMonthRange(new Date(data.year, monthIndex, 1)),
+    });
+  };
   const reorder = (
     section: AnnualTableSectionKey,
     from: string,
@@ -166,12 +184,13 @@ function AnnualGrid({ data }: { data: AnnualTablePayload }) {
               <Section
                 key={section.key}
                 section={section}
+                year={data.year}
                 fmt={fmt}
                 hover={hover}
                 dragging={dragging}
                 setDragging={setDragging}
                 onReorder={reorder}
-                onOpenCategory={setCategoryId}
+                onOpenCategory={openCategory}
               />
             ))}
           </tbody>
@@ -198,10 +217,10 @@ function AnnualGrid({ data }: { data: AnnualTablePayload }) {
         </table>
       </div>
       <BudgetDetailSheet
-        categoryId={categoryId}
-        from={`${data.year}-01-01`}
-        to={`${data.year}-12-31`}
-        onClose={() => setCategoryId(null)}
+        categoryId={selection?.categoryId ?? null}
+        from={selection?.from ?? `${data.year}-01-01`}
+        to={selection?.to ?? `${data.year}-12-31`}
+        onClose={() => setSelection(null)}
       />
     </>
   );
@@ -214,6 +233,7 @@ type Hover = {
 };
 function Section({
   section,
+  year,
   fmt,
   hover,
   dragging,
@@ -222,12 +242,13 @@ function Section({
   onOpenCategory,
 }: {
   section: AnnualTableSection;
+  year: number;
   fmt: (n: number) => string;
   hover: Hover;
   dragging: string | null;
   setDragging: (v: string | null) => void;
   onReorder: (section: AnnualTableSectionKey, from: string, to: string) => void;
-  onOpenCategory: (categoryId: number) => void;
+  onOpenCategory: (categoryId: number, monthIndex?: number) => void;
 }) {
   const labels: Record<AnnualTableSection["key"], string> = {
     income: "Income",
@@ -299,9 +320,20 @@ function Section({
                     ? `Unusually ${r.outliers[i]} for this category`
                     : undefined
                 }
-                className={`px-3 py-2.5 text-end tabular-nums ${r.outliers[i] === "high" ? "bg-destructive/10 text-destructive" : r.outliers[i] === "low" ? "bg-sky-500/10 text-sky-700 dark:text-sky-300" : hover.col === i ? "bg-primary/8" : ""}`}
+                className={`${r.categoryId != null ? "p-0" : "px-3 py-2.5"} text-end tabular-nums ${r.outliers[i] === "high" ? "bg-destructive/10 text-destructive" : r.outliers[i] === "low" ? "bg-sky-500/10 text-sky-700 dark:text-sky-300" : hover.col === i ? "bg-primary/8" : ""}`}
               >
-                {a ? fmt(a) : "—"}
+                {r.categoryId != null ? (
+                  <button
+                    type="button"
+                    aria-label={`Open ${r.name} for ${monthNames[i]} ${year}`}
+                    className="block w-full cursor-pointer px-3 py-2.5 text-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    onClick={() => onOpenCategory(r.categoryId!, i)}
+                  >
+                    {a ? fmt(a) : "—"}
+                  </button>
+                ) : (
+                  a ? fmt(a) : "—"
+                )}
               </td>
             ))}
             <td
@@ -591,4 +623,3 @@ function RecurringDialog({
     </Dialog>
   );
 }
-
