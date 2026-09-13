@@ -71,7 +71,7 @@ import {
   reverseExpenseDeployment,
   type CategoryDetail,
 } from "@/lib/api";
-import { formatCurrency, formatDate } from "@/lib/formatters";
+import { formatCurrency, formatDate, formatSignedCurrency } from "@/lib/formatters";
 import { Switch } from "@/components/ui/switch";
 import type { Category, TransactionWithCategory } from "@/lib/types";
 import type { CategoryChildBreakdown } from "@/lib/api";
@@ -290,6 +290,10 @@ function DetailContent({ data }: { data: CategoryDetail }) {
   const iconColor = shade(data.category.color);
   const pct = Math.min(100, Math.round(data.percentSpent));
   const isTracking = data.category.budgetMode === "tracking";
+  const hasRefundCredit = data.category.kind === "expense" && data.spent < 0;
+  const spentDisplay = hasRefundCredit
+    ? `+${formatCurrency(data.spent)}`
+    : formatCurrency(data.spent);
 
   const chartData = useMemo(
     () =>
@@ -337,7 +341,11 @@ function DetailContent({ data }: { data: CategoryDetail }) {
 
         {isTracking ? (
           <div className="mt-2 grid grid-cols-2 gap-3">
-            <Stat label="Spent" value={formatCurrency(data.spent)} />
+            <Stat
+              label="Spent"
+              value={spentDisplay}
+              valueColor={hasRefundCredit ? "var(--status-on-track)" : undefined}
+            />
             <Stat
               label="Typical / month"
               value={
@@ -355,7 +363,11 @@ function DetailContent({ data }: { data: CategoryDetail }) {
         ) : (
           <>
             <div className="mt-2 grid grid-cols-3 gap-3">
-              <Stat label="Spent" value={formatCurrency(data.spent)} />
+              <Stat
+                label="Spent"
+                value={spentDisplay}
+                valueColor={hasRefundCredit ? "var(--status-on-track)" : undefined}
+              />
               <BudgetStat
                 amount={data.budget}
                 isAuto={data.isAutoBudget}
@@ -402,6 +414,7 @@ function DetailContent({ data }: { data: CategoryDetail }) {
             onDeployment={handleDeployment}
             updatingTransactionId={updatingTransactionId}
             color={data.category.color}
+            categoryKind={data.category.kind}
           />
         )}
 
@@ -569,8 +582,19 @@ function DetailContent({ data }: { data: CategoryDetail }) {
                         onDeployment={handleDeployment}
                       />
                     </div>
-                    <div className="shrink-0 text-sm font-medium tabular-nums">
-                      {formatCurrency(t.chargedAmount)}
+                    <div
+                      className="shrink-0 text-sm font-medium tabular-nums"
+                      style={
+                        data.category.kind === "expense" && t.chargedAmount > 0
+                          ? { color: "var(--status-on-track)" }
+                          : undefined
+                      }
+                    >
+                      {data.category.kind === "expense" && t.chargedAmount > 0
+                        ? `+${formatCurrency(t.chargedAmount)}`
+                        : data.category.kind === "income" && t.chargedAmount < 0
+                          ? formatSignedCurrency(t.chargedAmount)
+                          : formatCurrency(t.chargedAmount)}
                     </div>
                   </li>
                 ))}
@@ -767,6 +791,7 @@ function NeedsReviewSection({
   onDeployment,
   updatingTransactionId,
   color,
+  categoryKind,
 }: {
   transactions: TransactionWithCategory[];
   categories: Category[];
@@ -778,6 +803,7 @@ function NeedsReviewSection({
   onDeployment: (transaction: TransactionWithCategory, months?: 6 | 12) => void;
   updatingTransactionId: number | null;
   color: string;
+  categoryKind: "expense" | "income";
 }) {
   return (
     <div
@@ -808,7 +834,25 @@ function NeedsReviewSection({
                 {t.description}
               </div>
               <div className="text-xs text-muted-foreground tabular-nums">
-                {formatDate(t.date)} · {formatCurrency(t.chargedAmount)}
+                {formatDate(t.date)} ·{" "}
+                <span
+                  className={
+                    categoryKind === "expense" && t.chargedAmount > 0
+                      ? "font-medium"
+                      : undefined
+                  }
+                  style={
+                    categoryKind === "expense" && t.chargedAmount > 0
+                      ? { color: "var(--status-on-track)" }
+                      : undefined
+                  }
+                >
+                  {categoryKind === "expense" && t.chargedAmount > 0
+                    ? `+${formatCurrency(t.chargedAmount)}`
+                    : categoryKind === "income" && t.chargedAmount < 0
+                      ? formatSignedCurrency(t.chargedAmount)
+                      : formatCurrency(t.chargedAmount)}
+                </span>
               </div>
               <DeploymentIndicator deployment={t.deployment} className="block" />
             </div>
@@ -871,17 +915,24 @@ function Stat({
   label,
   value,
   sublabel,
+  valueColor,
 }: {
   label: string;
   value: string;
   sublabel?: string;
+  valueColor?: string;
 }) {
   return (
     <div>
       <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </div>
-      <div className="mt-0.5 font-serif text-xl tabular-nums">{value}</div>
+      <div
+        className="mt-0.5 font-serif text-xl tabular-nums"
+        style={valueColor ? { color: valueColor } : undefined}
+      >
+        {value}
+      </div>
       {sublabel && (
         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
           {sublabel}

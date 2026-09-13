@@ -463,7 +463,11 @@ export async function syncWorkspace(
         const uncategorizedIds = getUncategorizedIdsByKind(workspaceId, kind);
         if (uncategorizedIds.length === 0) continue;
 
-        const categories = getAllCategories(workspaceId, kind);
+        // Positive transactions are marked as income, but a card refund may
+        // still belong to an expense category so it can reduce that spend.
+        const categories = kind === "income"
+          ? getAllCategories(workspaceId)
+          : getAllCategories(workspaceId, kind);
         if (categories.length === 0) continue;
         const categoryInput = categories.map((c) => ({
           name: c.name,
@@ -486,7 +490,7 @@ export async function syncWorkspace(
         const remainingTxns: typeof allTxns = [];
         for (const t of allTxns) {
           const m = memoryMap.get(t.description);
-          if (m && m.kind === kind) {
+          if (m && (m.kind === kind || kind === "income")) {
             memoryUpdates.push({ id: t.id, categoryId: m.categoryId });
             memoryKeysHit.push(normalizeMerchant(t.description));
           } else {

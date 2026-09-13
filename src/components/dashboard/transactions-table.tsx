@@ -393,13 +393,9 @@ export function TransactionsTable({
     finally { setUpdatingId(null); }
   };
 
-  const incomeCategoriesQuery = useQuery({
-    queryKey: ["categories", "income"],
-    queryFn: () => getCategories("income"),
-  });
-  const expenseCategoriesQuery = useQuery({
-    queryKey: ["categories", "expense"],
-    queryFn: () => getCategories("expense"),
+  const categoriesQuery = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => getCategories(),
   });
 
   const accountOptions = integrations
@@ -732,10 +728,15 @@ export function TransactionsTable({
               <TableBody>
                 {transactions.map((txn) => {
                   const isIncome = txn.chargedAmount > 0;
-                  const directionColor = isIncome
+                  const categoryKind = categoriesQuery.data?.find(
+                    (category) => category.id === txn.categoryId,
+                  )?.kind;
+                  const isRefund = isIncome && categoryKind === "expense";
+                  const directionColor = isRefund
                     ? "var(--status-on-track)"
-                    : "var(--status-over)";
-                  const categoryKind: Kind = isIncome ? "income" : "expense";
+                    : isIncome
+                      ? "var(--status-on-track)"
+                      : "var(--status-over)";
                   const categoryName = txn.categoryName
                     ? translateCategoryName(txn.categoryName, tCat)
                     : t("rowUncategorized");
@@ -811,11 +812,7 @@ export function TransactionsTable({
                           <TransactionCategoryPicker
                             categoryName={categoryName}
                             categoryColor={txn.categoryColor}
-                            categories={categoryKind === "income"
-                              ? incomeCategoriesQuery.data ?? []
-                              : categoryKind === "expense"
-                                ? expenseCategoriesQuery.data ?? []
-                                : []}
+                            categories={categoriesQuery.data ?? []}
                             disabled={updatingId === txn.id || locked}
                             search={pickerQuery}
                             onSearchChange={onPickerQueryChange}
@@ -854,6 +851,7 @@ export function TransactionsTable({
                         className="text-end font-medium tabular-nums"
                         style={{ color: directionColor }}
                       >
+                        {isRefund ? "+" : ""}
                         {formatCurrency(txn.chargedAmount, "ILS", locale)}
                       </TableCell>
                       <TableCell className="text-end">

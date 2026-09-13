@@ -34,7 +34,7 @@ import {
   updateAnnualTableOrder,
   updateRecurringTransaction,
 } from "@/lib/api";
-import { formatCurrency, getMonthRange } from "@/lib/formatters";
+import { formatCurrency, formatSignedCurrency, getMonthRange } from "@/lib/formatters";
 import type {
   AnnualTablePayload,
   AnnualTableRow,
@@ -107,7 +107,6 @@ export function AnnualTablePage() {
   );
 }
 function AnnualGrid({ data }: { data: AnnualTablePayload }) {
-  const fmt = (n: number) => formatCurrency(n, "ILS");
   const [row, setRow] = useState<string | null>(null);
   const [col, setCol] = useState<number | null>(null);
   const [sections, setSections] = useState(data.sections);
@@ -196,7 +195,6 @@ function AnnualGrid({ data }: { data: AnnualTablePayload }) {
                 key={section.key}
                 section={section}
                 year={data.year}
-                fmt={fmt}
                 hover={hover}
                 dragging={dragging}
                 setDragging={setDragging}
@@ -209,19 +207,19 @@ function AnnualGrid({ data }: { data: AnnualTablePayload }) {
             <Footer
               label="Income"
               amounts={data.incomeTotals}
-              fmt={fmt}
+              mode="income"
               hover={hover}
             />
             <Footer
               label="Expenses"
               amounts={data.expenseTotals}
-              fmt={fmt}
+              mode="expense"
               hover={hover}
             />
             <Footer
               label="Net"
               amounts={data.netTotals}
-              fmt={fmt}
+              mode="net"
               hover={hover}
             />
           </tfoot>
@@ -242,10 +240,22 @@ type Hover = {
   setRow: (v: string | null) => void;
   setCol: (v: number | null) => void;
 };
+type AmountMode = "income" | "expense" | "net";
+
+function formatTableAmount(amount: number, mode: AmountMode): string {
+  if (mode === "expense") {
+    return `${amount < 0 ? "+" : ""}${formatCurrency(amount, "ILS")}`;
+  }
+  if (mode === "income") {
+    return amount < 0
+      ? formatSignedCurrency(amount, "ILS")
+      : formatCurrency(amount, "ILS");
+  }
+  return formatCurrency(amount, "ILS");
+}
 function Section({
   section,
   year,
-  fmt,
   hover,
   dragging,
   setDragging,
@@ -254,7 +264,6 @@ function Section({
 }: {
   section: AnnualTableSection;
   year: number;
-  fmt: (n: number) => string;
   hover: Hover;
   dragging: string | null;
   setDragging: (v: string | null) => void;
@@ -266,6 +275,7 @@ function Section({
     mandatory: "Mandatory expenses",
     optional: "Optional expenses",
   };
+  const amountMode: AmountMode = section.key === "income" ? "income" : "expense";
   return (
     <>
       {
@@ -332,18 +342,24 @@ function Section({
                     : undefined
                 }
                 className={`${r.categoryId != null ? "p-0" : "px-3 py-2.5"} text-end tabular-nums ${r.outliers[i] === "high" ? "bg-destructive/10 text-destructive" : r.outliers[i] === "low" ? "bg-sky-500/10 text-sky-700 dark:text-sky-300" : hover.col === i ? "bg-primary/8" : ""}`}
+                style={amountMode === "expense" && a < 0 ? { color: "var(--status-on-track)" } : undefined}
               >
                 {r.categoryId != null ? (
                   <button
                     type="button"
                     aria-label={`Open ${r.name} for ${monthNames[i]} ${year}`}
                     className="block w-full cursor-pointer px-3 py-2.5 text-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    style={amountMode === "expense" && a < 0 ? { color: "var(--status-on-track)" } : undefined}
                     onClick={() => onOpenCategory(r.categoryId!, i)}
                   >
-                    {a ? fmt(a) : "—"}
+                    {a ? formatTableAmount(a, amountMode) : "—"}
                   </button>
                 ) : (
-                  a ? fmt(a) : "—"
+                  a ? (
+                    <span style={amountMode === "expense" && a < 0 ? { color: "var(--status-on-track)" } : undefined}>
+                      {formatTableAmount(a, amountMode)}
+                    </span>
+                  ) : "—"
                 )}
               </td>
             ))}
@@ -351,7 +367,9 @@ function Section({
               onMouseEnter={() => hover.setCol(12)}
               className={`sticky end-0 z-10 px-4 py-2.5 text-end tabular-nums ${hover.col === 12 ? "bg-primary/10" : "bg-card"}`}
             >
-              {fmt(r.average)}
+              <span style={amountMode === "expense" && r.average < 0 ? { color: "var(--status-on-track)" } : undefined}>
+                {formatTableAmount(r.average, amountMode)}
+              </span>
             </td>
           </tr>
         );
@@ -366,14 +384,18 @@ function Section({
             onMouseEnter={() => hover.setCol(i)}
             className={`px-3 py-2.5 text-end tabular-nums ${hover.col === i ? "bg-primary/10" : ""}`}
           >
-            {fmt(a)}
+            <span style={amountMode === "expense" && a < 0 ? { color: "var(--status-on-track)" } : undefined}>
+              {formatTableAmount(a, amountMode)}
+            </span>
           </td>
         ))}
         <td
           onMouseEnter={() => hover.setCol(12)}
           className={`sticky end-0 z-10 px-4 py-2.5 text-end tabular-nums ${hover.col === 12 ? "bg-primary/10" : "bg-muted/35"}`}
         >
-          {fmt(section.average)}
+          <span style={amountMode === "expense" && section.average < 0 ? { color: "var(--status-on-track)" } : undefined}>
+            {formatTableAmount(section.average, amountMode)}
+          </span>
         </td>
       </tr>
     </>
@@ -382,12 +404,12 @@ function Section({
 function Footer({
   label,
   amounts,
-  fmt,
+  mode,
   hover,
 }: {
   label: string;
   amounts: number[];
-  fmt: (n: number) => string;
+  mode: AmountMode;
   hover: Hover;
 }) {
   return (
@@ -406,7 +428,9 @@ function Footer({
           onMouseEnter={() => hover.setCol(i)}
           className={`px-3 py-3 text-end tabular-nums ${label === "Net" && a < 0 ? "text-destructive" : ""} ${hover.col === i ? "bg-primary/10" : ""}`}
         >
-          {fmt(a)}
+          <span style={mode === "expense" && a < 0 ? { color: "var(--status-on-track)" } : undefined}>
+            {formatTableAmount(a, mode)}
+          </span>
         </td>
       ))}
       <td

@@ -151,15 +151,12 @@ export async function GET(
   const vsLastMonth =
     prevSpent > 0 ? ((spent - prevSpent) / prevSpent) * 100 : null;
 
-  const filterKind = category.kind === "income" ? "income" : "expense";
-
   const { transactions, total: transactionCount } = queryTransactions(
     workspaceId,
     {
       from,
       to,
       ...(isParent ? { categoryIds: targetIds } : { category: categoryId }),
-      kind: filterKind,
       sort: "date",
       order: "desc",
       limit: 50,

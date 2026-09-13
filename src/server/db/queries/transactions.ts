@@ -438,9 +438,9 @@ export function queryTransactions(
   }
   const kind: TransactionKindFilter = params.kind ?? "all";
   if (kind === "income") {
-    conditions.push("t.charged_amount > 0");
+    conditions.push("t.kind = 'income'");
   } else if (kind === "expense") {
-    conditions.push("t.charged_amount < 0");
+    conditions.push("t.kind = 'expense'");
   }
   if (params.provider) {
     conditions.push("t.provider = ?");
@@ -516,16 +516,16 @@ export function getTransactionTotals(
     conditions.push(`t.category_id IN (${placeholders})`);
     values.push(...params.categoryIds);
   }
-  if (params.kind === "income") conditions.push("t.charged_amount > 0");
-  if (params.kind === "expense") conditions.push("t.charged_amount < 0");
+  if (params.kind === "income") conditions.push("t.kind = 'income'");
+  if (params.kind === "expense") conditions.push("t.kind = 'expense'");
   appendCredentialIdsFilter(conditions, values, params.credentialIds, "t.");
 
   const row = db
     .prepare(
       `SELECT
-         COALESCE(SUM(CASE WHEN t.charged_amount > 0 THEN t.charged_amount ELSE 0 END), 0) AS income,
-         COALESCE(SUM(CASE WHEN t.charged_amount < 0 THEN ABS(t.charged_amount) ELSE 0 END), 0) AS expense,
-         COALESCE(SUM(t.charged_amount), 0) AS net,
+         COALESCE(SUM(CASE WHEN t.kind = 'income' THEN t.charged_amount ELSE 0 END), 0) AS income,
+         COALESCE(SUM(CASE WHEN t.kind = 'expense' THEN -t.charged_amount ELSE 0 END), 0) AS expense,
+         COALESCE(SUM(CASE WHEN t.kind IN ('income', 'expense') THEN t.charged_amount ELSE 0 END), 0) AS net,
          COUNT(*) AS count
        FROM transactions t
        WHERE ${conditions.join(" AND ")}`,
@@ -583,8 +583,8 @@ export function getTransactionMerchants(
     conditions.push("transaction_calendar_date(date) <= ?");
     values.push(params.to);
   }
-  if (params.kind === "income") conditions.push("charged_amount > 0");
-  if (params.kind === "expense") conditions.push("charged_amount < 0");
+  if (params.kind === "income") conditions.push("kind = 'income'");
+  if (params.kind === "expense") conditions.push("kind = 'expense'");
 
   const rows = getDb()
     .prepare(
@@ -675,15 +675,16 @@ export function getMonthlySummary(
   const today = transactionCalendarDate(new Date().toISOString());
   return getDb()
     .prepare(
-      `SELECT substr(transaction_calendar_date(date), 1, 7) as month,
-              SUM(ABS(charged_amount)) as amount
-       FROM transactions
-       WHERE workspace_id = ?
-         AND transaction_calendar_date(date) >= date(?, '-' || ? || ' months')
-         AND status = 'completed'
-         AND kind = 'expense'
-         AND is_excluded = 0
-         AND is_deployed = 0
+      `SELECT substr(transaction_calendar_date(t.date), 1, 7) as month,
+              SUM(-t.charged_amount) as amount
+       FROM transactions t
+       LEFT JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ?
+         AND transaction_calendar_date(t.date) >= date(?, '-' || ? || ' months')
+         AND t.status = 'completed'
+         AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense'))
+         AND t.is_excluded = 0
+         AND t.is_deployed = 0
        GROUP BY month
        ORDER BY month ASC`
     )
@@ -698,14 +699,16 @@ export function getTopMerchants(
 ): MerchantSummary[] {
   return getDb()
     .prepare(
-      `SELECT description as name,
-              SUM(ABS(charged_amount)) as amount,
+      `SELECT t.description as name,
+              SUM(-t.charged_amount) as amount,
               COUNT(*) as count
-       FROM transactions
-       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense'
-         AND is_excluded = 0
-         AND is_deployed = 0
-       GROUP BY description
+       FROM transactions t
+       LEFT JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed'
+         AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense'))
+         AND t.is_excluded = 0
+         AND t.is_deployed = 0
+       GROUP BY t.description
        ORDER BY amount DESC
        LIMIT ?`
     )
@@ -723,11 +726,12 @@ export function getCategoryBreakdown(
          COALESCE(t.category_id, 0) as categoryId,
          COALESCE(c.name, 'Uncategorized') as name,
          COALESCE(c.color, '#B5B3AC') as color,
-         SUM(ABS(t.charged_amount)) as amount,
+         SUM(-t.charged_amount) as amount,
          COUNT(*) as count
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed' AND t.kind = 'expense'
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed'
+         AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense'))
          AND t.is_excluded = 0
          AND t.is_deployed = 0
        GROUP BY t.category_id
@@ -749,14 +753,15 @@ export function getCategorySpendInRange(
 ): CategorySpend[] {
   return getDb()
     .prepare(
-      `SELECT category_id as categoryId,
-              SUM(ABS(charged_amount)) as amount,
+      `SELECT t.category_id as categoryId,
+              SUM(-t.charged_amount) as amount,
               COUNT(*) as count
-       FROM transactions
-       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
-         AND is_excluded = 0
-         AND is_deployed = 0
-       GROUP BY category_id`
+       FROM transactions t
+       JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed' AND c.kind = 'expense'
+         AND t.is_excluded = 0
+         AND t.is_deployed = 0
+       GROUP BY t.category_id`
     )
     .all(workspaceId, from, to) as CategorySpend[];
 }
@@ -774,15 +779,16 @@ export function getTopMerchantPerCategory(
 ): CategoryTopMerchant[] {
   return getDb()
     .prepare(
-      `SELECT category_id as categoryId, description as merchant, amount
+      `SELECT categoryId, description as merchant, amount
        FROM (
-         SELECT category_id, description, SUM(ABS(charged_amount)) as amount,
-                ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY SUM(ABS(charged_amount)) DESC) as rn
-         FROM transactions
-         WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
-           AND is_excluded = 0
-           AND is_deployed = 0
-         GROUP BY category_id, description
+         SELECT t.category_id as categoryId, t.description, SUM(-t.charged_amount) as amount,
+                ROW_NUMBER() OVER (PARTITION BY t.category_id ORDER BY SUM(-t.charged_amount) DESC) as rn
+         FROM transactions t
+         JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+         WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed' AND c.kind = 'expense'
+           AND t.is_excluded = 0
+           AND t.is_deployed = 0
+         GROUP BY t.category_id, t.description
        )
        WHERE rn = 1`
     )
@@ -808,16 +814,18 @@ export function getCategorySpendByDay(
          SELECT date(d, '+1 day') FROM days WHERE d < date(?)
        )
        SELECT days.d as date,
-              COALESCE(SUM(ABS(t.charged_amount)), 0) as amount
+              COALESCE(SUM(CASE WHEN c.kind = 'expense' THEN -t.charged_amount ELSE t.charged_amount END), 0) as amount
        FROM days
        LEFT JOIN transactions t
          ON transaction_calendar_date(t.date) = days.d
          AND t.workspace_id = ?
          AND t.category_id = ?
-         AND t.kind = 'expense'
          AND t.status = 'completed'
          AND t.is_excluded = 0
          AND t.is_deployed = 0
+       LEFT JOIN categories c
+         ON c.workspace_id = t.workspace_id
+         AND c.id = t.category_id
        GROUP BY days.d
        ORDER BY days.d ASC`
     )
@@ -839,17 +847,17 @@ export function getTopMerchantsForCategory(
 ): TopMerchantForCategory[] {
   return getDb()
     .prepare(
-      `SELECT description as merchant,
-              SUM(ABS(charged_amount)) as amount,
+      `SELECT t.description as merchant,
+              SUM(CASE WHEN c.kind = 'expense' THEN -t.charged_amount ELSE t.charged_amount END) as amount,
               COUNT(*) as count
-       FROM transactions
-       WHERE workspace_id = ? AND category_id = ?
-         AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ?
-         AND status = 'completed'
-         AND kind = 'expense'
-         AND is_excluded = 0
-         AND is_deployed = 0
-       GROUP BY description
+       FROM transactions t
+       JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND t.category_id = ?
+         AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ?
+         AND t.status = 'completed'
+         AND t.is_excluded = 0
+         AND t.is_deployed = 0
+       GROUP BY t.description
        ORDER BY amount DESC
        LIMIT ?`
     )
@@ -863,11 +871,13 @@ export function getPeriodTotal(
 ): number {
   const row = getDb()
     .prepare(
-      `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total
-       FROM transactions
-       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense'
-         AND is_excluded = 0
-         AND is_deployed = 0`
+      `SELECT COALESCE(SUM(-t.charged_amount), 0) as total
+       FROM transactions t
+       LEFT JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed'
+         AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense'))
+         AND t.is_excluded = 0
+         AND t.is_deployed = 0`
     )
     .get(workspaceId, from, to) as { total: number };
   return row.total;
@@ -881,9 +891,11 @@ export function getPeriodCount(
   const row = getDb()
     .prepare(
       `SELECT COUNT(*) as count
-       FROM transactions
-       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense'
-         AND is_excluded = 0`
+       FROM transactions t
+       LEFT JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed'
+         AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense'))
+         AND t.is_excluded = 0`
     )
     .get(workspaceId, from, to) as { count: number };
   return row.count;
@@ -1089,20 +1101,19 @@ export function getTransactionsSummary(
     .prepare(
       `SELECT COALESCE(SUM(charged_amount), 0) as total, COUNT(*) as count
        FROM transactions
-       WHERE ${baseWhere} AND charged_amount > 0`
+       WHERE ${baseWhere} AND kind = 'income'`
     )
     .get(...baseValues) as { total: number; count: number };
 
   const expenseAgg = db
     .prepare(
-      `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total, COUNT(*) as count
+      `SELECT COALESCE(SUM(-charged_amount), 0) as total, COUNT(*) as count
        FROM transactions
-       WHERE ${baseWhere} AND charged_amount < 0`
+       WHERE ${baseWhere} AND kind = 'expense'`
     )
     .get(...baseValues) as { total: number; count: number };
 
   const pickLargest = (sign: "income" | "expense"): TransactionWithCategory | null => {
-    const cmp = sign === "income" ? "> 0" : "< 0";
     const tConditions = [
       "t.workspace_id = ?",
       "transaction_calendar_date(t.date) >= ?",
@@ -1110,7 +1121,7 @@ export function getTransactionsSummary(
       "t.status = 'completed'",
       "t.is_excluded = 0",
       "t.is_deployed = 0",
-      `t.charged_amount ${cmp}`,
+      `t.kind = '${sign}'`,
     ];
     const tValues: (string | number)[] = [workspaceId, from, to];
     appendCredentialIdsFilter(tConditions, tValues, summaryCredentialIds, "t.");
@@ -1128,10 +1139,10 @@ export function getTransactionsSummary(
   const topMerchantsRows = db
     .prepare(
       `SELECT description,
-              SUM(ABS(charged_amount)) as total,
+              SUM(-charged_amount) as total,
               COUNT(*) as count
        FROM transactions
-       WHERE ${baseWhere} AND charged_amount < 0
+       WHERE ${baseWhere} AND kind = 'expense'
        GROUP BY description
        ORDER BY total DESC
        LIMIT 5`

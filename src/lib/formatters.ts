@@ -42,6 +42,15 @@ export function formatCurrency(
   }
 }
 
+export function formatSignedCurrency(
+  amount: number,
+  currency = "ILS",
+  locale?: Locale,
+): string {
+  const sign = amount > 0 ? "+" : amount < 0 ? "−" : "";
+  return `${sign}${formatCurrency(amount, currency, locale)}`;
+}
+
 export function formatDate(isoDate: string): string {
   const [year, month, day] = transactionCalendarDate(isoDate).split("-");
   return `${day}/${month}/${year}`;

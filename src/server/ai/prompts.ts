@@ -77,7 +77,7 @@ export function buildCategorizationPrompt(
   const transactionLines = transactions
     .map(
       (t, i) =>
-        `${i}: "${t.description}" | ${t.currency} ${Math.abs(t.amount).toFixed(2)}${t.memo ? ` | memo: "${t.memo}"` : ""}`
+        `${i}: "${t.description}" | ${t.currency} ${t.amount >= 0 ? "+" : "-"}${Math.abs(t.amount).toFixed(2)}${t.memo ? ` | memo: "${t.memo}"` : ""}`
     )
     .join("\n");
 
@@ -99,6 +99,7 @@ Rules:
 - Use ONLY category names from the provided list.
 - ${HIERARCHY_RULE}
 - Every transaction must be categorized; pick the closest matching category.
+- A positive transaction can be ordinary income or a refund. Categorize a refund under the expense category of the original purchase so it reduces that category's spending.
 - Israeli merchant names (Hebrew or transliterated) are common; categorize based on the business type.
 - Pay attention to the "NOT" clauses in the category descriptions - they disambiguate common confusions.
 - Apply lessons from "Past corrections" - if a new merchant resembles a past correction, prefer the corrected category.`;
@@ -129,6 +130,7 @@ Rules for new categories:
 
 Rules for every transaction:
 - Every transaction must be categorized - either an existing or a proposed new category.
+- A positive transaction can be ordinary income or a refund. Categorize a refund under the expense category of the original purchase so it reduces that category's spending.
 - ${HIERARCHY_RULE}
 - Israeli merchant names (Hebrew or transliterated) are common; categorize based on the business type.
 - Pay attention to the "NOT" clauses in the category descriptions.

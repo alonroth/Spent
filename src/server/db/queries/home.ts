@@ -28,10 +28,11 @@ export function getCashFlow(
     .get(workspaceId, from, to) as { total: number };
   const expenses = db
     .prepare(
-      `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total
-       FROM transactions
-       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ?
-         AND status = 'completed' AND kind = 'expense' AND is_excluded = 0`
+      `SELECT COALESCE(SUM(-t.charged_amount), 0) as total
+       FROM transactions t
+       LEFT JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ?
+         AND t.status = 'completed' AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense')) AND t.is_excluded = 0`
     )
     .get(workspaceId, from, to) as { total: number };
   return {
@@ -63,10 +64,11 @@ export function getHistoricalTrend(
   }
 
   const stmt = db.prepare(
-    `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total
-     FROM transactions
-     WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ?
-       AND status = 'completed' AND kind = 'expense' AND is_excluded = 0`
+    `SELECT COALESCE(SUM(-t.charged_amount), 0) as total
+     FROM transactions t
+     LEFT JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+     WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ?
+       AND t.status = 'completed' AND (c.kind = 'expense' OR (c.id IS NULL AND t.kind = 'expense')) AND t.is_excluded = 0`
   );
 
   return months.map((m) => {
@@ -254,12 +256,13 @@ export function getCategorySnapshot(
 
   const spendRows = db
     .prepare(
-      `SELECT category_id as categoryId, SUM(ABS(charged_amount)) as amount
-       FROM transactions
-       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ?
-         AND status = 'completed' AND kind = 'expense'
-         AND category_id IS NOT NULL AND is_excluded = 0
-       GROUP BY category_id`
+      `SELECT t.category_id as categoryId, SUM(-t.charged_amount) as amount
+       FROM transactions t
+       JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ?
+         AND t.status = 'completed' AND c.kind = 'expense'
+         AND t.is_excluded = 0
+       GROUP BY t.category_id`
     )
     .all(workspaceId, from, to) as Array<{ categoryId: number; amount: number }>;
 

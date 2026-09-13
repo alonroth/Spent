@@ -61,7 +61,7 @@ export function detectKind(
   if (isBankProvider(provider) && matchesTransferPattern(description)) {
     return "transfer";
   }
-  if (isBankProvider(provider) && chargedAmount > 0) {
+  if (chargedAmount > 0) {
     return "income";
   }
   return "expense";

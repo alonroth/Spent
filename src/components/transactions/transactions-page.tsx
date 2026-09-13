@@ -160,9 +160,8 @@ export function TransactionsPage() {
   });
 
   const categoriesQuery = useQuery({
-    queryKey: ["categories", kind === "income" ? "income" : "expense"],
-    queryFn: () =>
-      kind === "income" ? getCategories("income") : getCategories("expense"),
+    queryKey: ["categories"],
+    queryFn: () => getCategories(),
   });
 
   const periodLabel = period.mode === "month"

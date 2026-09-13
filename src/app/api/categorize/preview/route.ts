@@ -15,7 +15,8 @@ import { sanitizeSensitiveText } from "@/server/lib/sanitize-sensitive";
 
 /**
  * Preview mode: run AI categorization with proposal-enabled prompt, split by
- * expense vs income so each transaction is offered categories of its own kind.
+ * expense vs income. Positive transactions also see expense categories so
+ * refunds can remain attached to the purchase category they reduce.
  */
 export async function POST(request: Request) {
   const workspaceId = getWorkspaceIdFromRequest(request);
@@ -60,7 +61,9 @@ export async function POST(request: Request) {
     totalUncategorized += ids.length;
     if (ids.length === 0) continue;
 
-    const categories = getAllCategories(workspaceId, kind);
+    const categories = kind === "income"
+      ? getAllCategories(workspaceId)
+      : getAllCategories(workspaceId, kind);
     if (categories.length === 0) continue;
 
     // Build a parentId -> name lookup so we can attach parent context to
