@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import {
   Bar,
   BarChart,
@@ -31,6 +32,10 @@ import {
   Check,
   ChevronDown,
   Pencil,
+  MoreHorizontal,
+  Eye,
+  EyeOff,
+  Trash2,
   type LucideIcon,
   CircleDot,
 } from "lucide-react";
@@ -59,6 +64,11 @@ import {
   updateBudget,
   updateCategoryBudgetMode,
   updateTransactionCategory,
+  setTransactionKind,
+  setTransactionExcluded,
+  deleteManualTransaction,
+  deployExpense,
+  reverseExpenseDeployment,
   type CategoryDetail,
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -66,6 +76,9 @@ import { Switch } from "@/components/ui/switch";
 import type { Category, TransactionWithCategory } from "@/lib/types";
 import type { CategoryChildBreakdown } from "@/lib/api";
 import { DeploymentIndicator } from "@/components/transactions/deployment-indicator";
+import { toast } from "sonner";
+
+type TransactionKind = "expense" | "income" | "transfer";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   "shopping-basket": ShoppingBasket,
@@ -141,7 +154,9 @@ function DetailSkeleton() {
 }
 
 function DetailContent({ data }: { data: CategoryDetail }) {
+  const t = useTranslations("transactions");
   const queryClient = useQueryClient();
+  const [updatingTransactionId, setUpdatingTransactionId] = useState<number | null>(null);
   const sameKindCategoriesQuery = useQuery({
     queryKey: ["categories", data.category.kind],
     queryFn: () => getCategories(data.category.kind),
@@ -163,6 +178,66 @@ function DetailContent({ data }: { data: CategoryDetail }) {
     invalidate();
   };
 
+  const invalidateAfterTransactionAction = () => {
+    invalidate();
+    queryClient.invalidateQueries({ queryKey: ["categories"] });
+    queryClient.invalidateQueries({ queryKey: ["home"] });
+    queryClient.invalidateQueries({ queryKey: ["excluded-merchants"] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+  };
+
+  const handleKindChange = async (id: number, kind: TransactionKind) => {
+    setUpdatingTransactionId(id);
+    try {
+      await setTransactionKind(id, kind);
+      invalidateAfterTransactionAction();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update transaction");
+    } finally {
+      setUpdatingTransactionId(null);
+    }
+  };
+
+  const handleExcludeToggle = async (
+    transaction: TransactionWithCategory,
+    alwaysForMerchant = false,
+  ) => {
+    const excluded = !transaction.isExcluded;
+    setUpdatingTransactionId(transaction.id);
+    try {
+      await setTransactionExcluded(transaction.id, excluded, alwaysForMerchant);
+      invalidateAfterTransactionAction();
+      toast.success(
+        excluded
+          ? alwaysForMerchant
+            ? t("excludeMerchantToast", { merchant: transaction.description })
+            : t("excludeToast")
+          : t("includeToast"),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update transaction");
+    } finally {
+      setUpdatingTransactionId(null);
+    }
+  };
+
+  const handleDeleteManual = async (transaction: TransactionWithCategory) => {
+    if (!window.confirm(t("deleteManualConfirm", { description: transaction.description }))) {
+      return;
+    }
+    setUpdatingTransactionId(transaction.id);
+    try {
+      await deleteManualTransaction(transaction.id);
+      invalidateAfterTransactionAction();
+      queryClient.invalidateQueries({ queryKey: ["transaction-merchants"] });
+      toast.success(t("deleteManualSuccess"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("deleteManualFailed"));
+    } finally {
+      setUpdatingTransactionId(null);
+    }
+  };
+
   const handleToggleMode = async (checked: boolean) => {
     await updateCategoryBudgetMode(
       data.category.id,
@@ -174,6 +249,41 @@ function DetailContent({ data }: { data: CategoryDetail }) {
   const handleSaveBudget = async (amount: number | null) => {
     await updateBudget(data.category.id, amount);
     invalidate();
+  };
+
+  const handleDeployment = async (
+    transaction: TransactionWithCategory,
+    months?: 6 | 12,
+  ) => {
+    const reversing = months === undefined;
+    if (
+      reversing &&
+      !window.confirm("Reverse this deployment and restore the original transaction?")
+    ) {
+      return;
+    }
+
+    setUpdatingTransactionId(transaction.id);
+    try {
+      if (months) {
+        await deployExpense(transaction.id, months);
+      } else {
+        await reverseExpenseDeployment(transaction.id);
+      }
+      invalidateAfterTransactionAction();
+      queryClient.invalidateQueries({ queryKey: ["transactions-totals"] });
+      toast.success(
+        reversing
+          ? "Deployment reversed"
+          : `Expense spread across ${months} months`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not update deployment",
+      );
+    } finally {
+      setUpdatingTransactionId(null);
+    }
   };
 
   const Icon = ICON_MAP[data.category.icon ?? "circle-dot"] ?? CircleDot;
@@ -286,6 +396,11 @@ function DetailContent({ data }: { data: CategoryDetail }) {
             categories={sameKindCategoriesQuery.data ?? []}
             onApprove={handleApprove}
             onChange={handleChangeCategory}
+            onKindChange={handleKindChange}
+            onExcludeToggle={handleExcludeToggle}
+            onDeleteManual={handleDeleteManual}
+            onDeployment={handleDeployment}
+            updatingTransactionId={updatingTransactionId}
             color={data.category.color}
           />
         )}
@@ -418,32 +533,42 @@ function DetailContent({ data }: { data: CategoryDetail }) {
                       </div>
                       <DeploymentIndicator deployment={t.deployment} className="block" />
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
-                        <Badge
-                          variant="outline"
-                          className="border-none p-0"
-                          style={{ color: t.categoryColor ?? undefined }}
-                        >
-                          {t.categoryName ?? "Uncategorized"}
-                        </Badge>
-                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {(sameKindCategoriesQuery.data ?? []).map((cat) => (
-                          <DropdownMenuItem
-                            key={cat.id}
-                            onClick={() => handleChangeCategory(t.id, cat.id)}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
+                          <Badge
+                            variant="outline"
+                            className="border-none p-0"
+                            style={{ color: t.categoryColor ?? undefined }}
                           >
-                            <div
-                              className="me-2 h-2 w-2 rounded-full"
-                              style={{ backgroundColor: cat.color }}
-                            />
-                            {cat.name}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                            {t.categoryName ?? "Uncategorized"}
+                          </Badge>
+                          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {(sameKindCategoriesQuery.data ?? []).map((cat) => (
+                            <DropdownMenuItem
+                              key={cat.id}
+                              onClick={() => handleChangeCategory(t.id, cat.id)}
+                            >
+                              <div
+                                className="me-2 h-2 w-2 rounded-full"
+                                style={{ backgroundColor: cat.color }}
+                              />
+                              {cat.name}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <TransactionActionsMenu
+                        transaction={t}
+                        updating={updatingTransactionId === t.id}
+                        onKindChange={handleKindChange}
+                        onExcludeToggle={handleExcludeToggle}
+                        onDeleteManual={handleDeleteManual}
+                        onDeployment={handleDeployment}
+                      />
+                    </div>
                     <div className="shrink-0 text-sm font-medium tabular-nums">
                       {formatCurrency(t.chargedAmount)}
                     </div>
@@ -455,6 +580,106 @@ function DetailContent({ data }: { data: CategoryDetail }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function TransactionActionsMenu({
+  transaction,
+  updating,
+  onKindChange,
+  onExcludeToggle,
+  onDeleteManual,
+  onDeployment,
+}: {
+  transaction: TransactionWithCategory;
+  updating: boolean;
+  onKindChange: (id: number, kind: TransactionKind) => void;
+  onExcludeToggle: (transaction: TransactionWithCategory, alwaysForMerchant?: boolean) => void;
+  onDeleteManual: (transaction: TransactionWithCategory) => void;
+  onDeployment: (transaction: TransactionWithCategory, months?: 6 | 12) => void;
+}) {
+  const t = useTranslations("transactions");
+  const otherKinds: Record<TransactionKind, TransactionKind[]> = {
+    expense: ["income", "transfer"],
+    income: ["expense", "transfer"],
+    transfer: ["expense", "income"],
+  };
+  const kindLabel: Record<TransactionKind, string> = {
+    expense: t("markAsExpense"),
+    income: t("markAsIncome"),
+    transfer: t("markAsTransfer"),
+  };
+  const canDeploy =
+    transaction.status === "completed" &&
+    transaction.kind === "expense" &&
+    transaction.type === "normal" &&
+    !transaction.isExcluded &&
+    transaction.source !== "recurring";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        disabled={updating}
+        aria-label={t("rowActions")}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {transaction.deployment ? (
+          <DropdownMenuItem onClick={() => onDeployment(transaction)}>
+            {t("reverseDeployment")}
+          </DropdownMenuItem>
+        ) : (
+          <>
+            {otherKinds[transaction.kind].map((kind) => (
+              <DropdownMenuItem
+                key={kind}
+                onClick={() => onKindChange(transaction.id, kind)}
+              >
+                {kindLabel[kind]}
+              </DropdownMenuItem>
+            ))}
+            {transaction.isExcluded ? (
+              <DropdownMenuItem onClick={() => onExcludeToggle(transaction)}>
+                <Eye className="me-2 h-3.5 w-3.5" />
+                {t("includeAction")}
+              </DropdownMenuItem>
+            ) : (
+              <>
+                <DropdownMenuItem onClick={() => onExcludeToggle(transaction)}>
+                  <EyeOff className="me-2 h-3.5 w-3.5" />
+                  {t("excludeAction")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onExcludeToggle(transaction, true)}>
+                  <EyeOff className="me-2 h-3.5 w-3.5" />
+                  {t("excludeMerchantAction")}
+                </DropdownMenuItem>
+              </>
+            )}
+            {transaction.provider === "manual" && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onDeleteManual(transaction)}
+              >
+                <Trash2 className="me-2 h-3.5 w-3.5" />
+                {t("deleteManualAction")}
+              </DropdownMenuItem>
+            )}
+            {canDeploy && (
+              <>
+                <DropdownMenuItem onClick={() => onDeployment(transaction, 6)}>
+                  {t("deployMonths", { months: 6 })}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onDeployment(transaction, 12)}>
+                  {t("deployMonths", { months: 12 })}
+                </DropdownMenuItem>
+              </>
+            )}
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -536,12 +761,22 @@ function NeedsReviewSection({
   categories,
   onApprove,
   onChange,
+  onKindChange,
+  onExcludeToggle,
+  onDeleteManual,
+  onDeployment,
+  updatingTransactionId,
   color,
 }: {
   transactions: TransactionWithCategory[];
   categories: Category[];
   onApprove: (id: number) => void;
   onChange: (id: number, categoryId: number) => void;
+  onKindChange: (id: number, kind: TransactionKind) => void;
+  onExcludeToggle: (transaction: TransactionWithCategory, alwaysForMerchant?: boolean) => void;
+  onDeleteManual: (transaction: TransactionWithCategory) => void;
+  onDeployment: (transaction: TransactionWithCategory, months?: 6 | 12) => void;
+  updatingTransactionId: number | null;
   color: string;
 }) {
   return (
@@ -616,6 +851,14 @@ function NeedsReviewSection({
                 <Check className="h-3.5 w-3.5" />
                 Approve
               </Button>
+              <TransactionActionsMenu
+                transaction={t}
+                updating={updatingTransactionId === t.id}
+                onKindChange={onKindChange}
+                onExcludeToggle={onExcludeToggle}
+                onDeleteManual={onDeleteManual}
+                onDeployment={onDeployment}
+              />
             </div>
           </li>
         ))}
