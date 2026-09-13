@@ -38,6 +38,7 @@ import {
   updateBudget,
   updateCategoryBudgetMode,
   updateCategoryDescription,
+  updateCategoryExpenseType,
 } from "@/lib/api";
 import type { Category, CategoryWithData } from "@/lib/types";
 
@@ -150,6 +151,10 @@ function Body({
           <BudgetSection category={category} data={data} />
         )}
 
+        {category.kind === "expense" && !isParentGroup ? (
+          <ExpenseTypeSection category={category} />
+        ) : null}
+
         <GroupSection
           category={category}
           eligibleParents={eligibleParents}
@@ -166,6 +171,55 @@ function Body({
         />
       </div>
     </div>
+  );
+}
+
+function ExpenseTypeSection({ category }: { category: Category }) {
+  const queryClient = useQueryClient();
+  const expenseType = category.expenseType ?? "optional";
+  const mutation = useMutation({
+    mutationFn: (expenseType: "mandatory" | "optional") =>
+      updateCategoryExpenseType(category.id, expenseType),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+      toast.success("Expense type updated");
+    },
+    onError: () => toast.error("Couldn't update expense type."),
+  });
+
+  return (
+    <section>
+      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        Expense type
+      </div>
+      <div className="mt-3 rounded-xl border border-border bg-card p-4">
+        <div className="space-y-2">
+          <Label htmlFor={`expense-type-${category.id}`}>Classification</Label>
+          <Select
+            value={expenseType}
+            disabled={mutation.isPending}
+            onValueChange={(value) => {
+              if (value === "mandatory" || value === "optional") {
+                mutation.mutate(value);
+              }
+            }}
+          >
+            <SelectTrigger id={`expense-type-${category.id}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mandatory">Mandatory</SelectItem>
+              <SelectItem value="optional">Optional</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {expenseType === "mandatory"
+              ? "Essential spending, such as rent, groceries, or utilities."
+              : "Discretionary spending that you can choose to reduce."}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 

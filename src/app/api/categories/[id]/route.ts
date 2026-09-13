@@ -4,6 +4,7 @@ import {
   setCategoryParent,
   updateCategoryBudgetMode,
   updateCategoryDescription,
+  updateCategoryExpenseType,
 } from "@/server/db/queries/categories";
 import { getWorkspaceIdFromRequest } from "@/server/lib/workspace-context";
 
@@ -30,6 +31,7 @@ export async function PATCH(
   const typed = body as {
     budgetMode?: unknown;
     description?: unknown;
+    expenseType?: unknown;
     parentId?: unknown;
   };
 
@@ -72,6 +74,27 @@ export async function PATCH(
     );
     if (!ok) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    applied = true;
+  }
+
+  if (typed.expenseType !== undefined) {
+    if (typed.expenseType !== "mandatory" && typed.expenseType !== "optional") {
+      return NextResponse.json(
+        { error: "expenseType must be 'mandatory' or 'optional'" },
+        { status: 400 }
+      );
+    }
+    const ok = updateCategoryExpenseType(
+      workspaceId,
+      categoryId,
+      typed.expenseType
+    );
+    if (!ok) {
+      return NextResponse.json(
+        { error: "not found, not an expense category, or not a leaf category" },
+        { status: 404 }
+      );
     }
     applied = true;
   }
