@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Check, ChevronDown } from "lucide-react";
 import {
@@ -24,7 +25,7 @@ interface TransactionMultiFilterProps {
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   showBulkActions?: boolean;
-  children: React.ReactNode;
+  children: React.ReactNode | ((searchValue: string) => React.ReactNode);
 }
 
 export function TransactionMultiFilter({
@@ -37,11 +38,13 @@ export function TransactionMultiFilter({
   onSelectAll,
   onClear,
   searchPlaceholder,
-  searchValue,
+  searchValue: controlledSearchValue,
   onSearchChange,
   showBulkActions = true,
   children,
 }: TransactionMultiFilterProps) {
+  const [uncontrolledSearchValue, setUncontrolledSearchValue] = useState("");
+  const searchValue = controlledSearchValue ?? uncontrolledSearchValue;
   const triggerTitle = `${label}: ${displayValue}`;
 
   return (
@@ -64,9 +67,9 @@ export function TransactionMultiFilter({
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60" />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-0">
-        {searchPlaceholder && onSearchChange ? (
+        {searchPlaceholder ? (
           <div className="border-b border-border p-2">
-            <Input aria-label={searchPlaceholder} autoFocus className="h-8" placeholder={searchPlaceholder} value={searchValue ?? ""} onChange={(event) => onSearchChange(event.target.value)} />
+            <Input aria-label={searchPlaceholder} autoFocus className="h-8" placeholder={searchPlaceholder} value={searchValue} onChange={(event) => (onSearchChange ?? setUncontrolledSearchValue)(event.target.value)} />
           </div>
         ) : null}
         {showBulkActions ? (
@@ -91,7 +94,9 @@ export function TransactionMultiFilter({
             </Button>
           </div>
         ) : null}
-        <div className="max-h-64 overflow-y-auto p-1">{children}</div>
+        <div className="max-h-64 overflow-y-auto p-1">
+          {typeof children === "function" ? children(searchValue) : children}
+        </div>
       </PopoverContent>
     </Popover>
   );

@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { PageHeader } from "@/components/layout/app-shell";
@@ -22,8 +20,6 @@ import type { TransactionKindFilter } from "@/lib/api";
 import { expandCategoryFilterIds } from "@/lib/transaction-filters";
 import {
   nextSortState,
-  type SortOrder,
-  type TransactionSortField,
 } from "@/lib/transaction-sort";
 import {
   addMonths,
@@ -33,6 +29,8 @@ import {
 } from "@/lib/formatters";
 import type { Locale } from "@/i18n/routing";
 import { ManualTransactionDialog } from "./manual-transaction-dialog";
+import { useUrlQueryState } from "@/hooks/use-url-query-state";
+import { readEnum, readPeriod, readPositiveInteger, readPositiveIntegers, readStrings } from "@/lib/url-state";
 
 function monthDate(value: string): Date {
   return new Date(
@@ -50,36 +48,25 @@ function shiftRange(from: string, to: string, amount: number) {
   const start = addMonths(monthDate(from), amount);
   const end = addMonths(monthDate(to), amount);
   return {
-    from: getMonthRange(start).from,
-    to: getMonthRange(end).to,
+    from: monthValue(start),
+    to: monthValue(end),
   };
 }
 
 export function TransactionsPage() {
   const t = useTranslations("transactions");
   const locale = useLocale() as Locale;
-  const searchParams = useSearchParams();
-  const requestedMonth = searchParams.get("month");
+  const { searchParams, pushQuery } = useUrlQueryState();
   const focusId = Number(searchParams.get("focus")) || undefined;
-  const [period, setPeriod] = useState<
-    | { mode: "month"; month: string }
-    | { mode: "range"; from: string; to: string }
-  >(() => {
-    const now = new Date();
-    const month = requestedMonth && /^\d{4}-\d{2}$/.test(requestedMonth) ? requestedMonth : undefined;
-    return {
-      mode: "month",
-      month: month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
-    };
-  });
-  const [search, setSearch] = useState("");
-  const [merchantFilter, setMerchantFilter] = useState<string[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState<number[]>([]);
-  const [accountFilter, setAccountFilter] = useState<number[]>([]);
-  const [page, setPage] = useState(0);
-  const [kind, setKind] = useState<TransactionKindFilter>("all");
-  const [sortField, setSortField] = useState<TransactionSortField>("date");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const period = readPeriod(searchParams);
+  const search = searchParams.get("q") ?? "";
+  const merchantFilter = readStrings(searchParams, "merchant");
+  const categoryFilter = readPositiveIntegers(searchParams, "category");
+  const accountFilter = readPositiveIntegers(searchParams, "account");
+  const page = readPositiveInteger(searchParams, "page", 1) - 1;
+  const kind = readEnum(searchParams, "kind", ["all", "income", "expense"] as const, "all");
+  const sortField = readEnum(searchParams, "sort", ["date", "description", "category_name", "account", "charged_amount"] as const, "date");
+  const sortOrder = readEnum(searchParams, "order", ["asc", "desc"] as const, "desc");
 
   const filterOptions: { value: TransactionKindFilter; label: string }[] = [
     { value: "all", label: t("filterAll") },
@@ -89,8 +76,8 @@ export function TransactionsPage() {
 
   const selectedDate = period.mode === "month" ? monthDate(period.month) : monthDate(period.from);
   const monthRange = getMonthRange(selectedDate);
-  const from = period.mode === "month" ? monthRange.from : period.from;
-  const to = period.mode === "month" ? monthRange.to : period.to;
+  const from = period.mode === "month" ? monthRange.from : `${period.from}-01`;
+  const to = period.mode === "month" ? monthRange.to : getMonthRange(monthDate(period.to)).to;
 
   const allCategoriesQuery = useQuery({
     queryKey: ["categories"],
@@ -180,7 +167,7 @@ export function TransactionsPage() {
 
   const periodLabel = period.mode === "month"
     ? formatMonthLabel(selectedDate, locale)
-    : `${formatMonth(period.from, locale)} – ${formatMonth(period.to, locale)}`;
+    : `${formatMonth(`${period.from}-01`, locale)} – ${formatMonth(`${period.to}-01`, locale)}`;
 
   const summaryInitialLoading =
     summaryQuery.isPending && summaryQuery.data === undefined;
@@ -203,27 +190,24 @@ export function TransactionsPage() {
               onPrev={() => {
                 if (period.mode === "month") {
                   const date = addMonths(selectedDate, -1);
-                  setPeriod({ mode: "month", month: monthValue(date) });
+                  pushQuery({ month: monthValue(date), from: null, to: null });
                 } else {
                   const shifted = shiftRange(period.from, period.to, -1);
-                  setPeriod({ mode: "range", ...shifted });
+                  pushQuery({ month: null, from: shifted.from, to: shifted.to });
                 }
               }}
               onNext={() => {
                 if (period.mode === "month") {
                   const date = addMonths(selectedDate, 1);
-                  setPeriod({ mode: "month", month: monthValue(date) });
+                  pushQuery({ month: monthValue(date), from: null, to: null });
                 } else {
                   const shifted = shiftRange(period.from, period.to, 1);
-                  setPeriod({ mode: "range", ...shifted });
+                  pushQuery({ month: null, from: shifted.from, to: shifted.to });
                 }
               }}
-              onMonthChange={(month) => setPeriod({ mode: "month", month })}
-              onRangeApply={(rangeFrom, rangeTo) => setPeriod({ mode: "range", from: `${rangeFrom}-01`, to: getMonthRange(new Date(Number(rangeTo.slice(0, 4)), Number(rangeTo.slice(5, 7)), 0)).to })}
-              onReset={() => {
-                const now = new Date();
-                setPeriod({ mode: "month", month: monthValue(now) });
-              }}
+              onMonthChange={(month) => pushQuery({ month, from: null, to: null })}
+              onRangeApply={(rangeFrom, rangeTo) => pushQuery({ month: null, from: rangeFrom.slice(0, 7), to: rangeTo.slice(0, 7) })}
+              onReset={() => pushQuery({ month: monthValue(new Date()), from: null, to: null })}
             />
             <ManualTransactionDialog />
           </div>
@@ -247,10 +231,7 @@ export function TransactionsPage() {
                 key={opt.value}
                 type="button"
                 onClick={() => {
-                  setKind(opt.value);
-                  setPage(0);
-                  setCategoryFilter([]);
-                  setMerchantFilter([]);
+                  pushQuery({ kind: opt.value === "all" ? null : opt.value, category: null, merchant: null, page: null });
                 }}
                 className={
                   active
@@ -276,37 +257,37 @@ export function TransactionsPage() {
             isFetching={transactionsQuery.isFetching}
             totals={totalsQuery.data}
             totalsLoading={totalsQuery.isPending && totalsQuery.data === undefined}
+            merchantQuery={searchParams.get("merchantQ") ?? ""}
+            onMerchantQueryChange={(value) => pushQuery({ merchantQ: value || null })}
+            categoryQuery={searchParams.get("categoryQ") ?? ""}
+            onCategoryQueryChange={(value) => pushQuery({ categoryQ: value || null })}
+            pickerQuery={searchParams.get("pickerQ") ?? ""}
+            onPickerQueryChange={(value) => pushQuery({ pickerQ: value || null })}
             sortField={sortField}
             sortOrder={sortOrder}
             onSortChange={(field) => {
               const next = nextSortState(sortField, sortOrder, field);
-              setSortField(next.field);
-              setSortOrder(next.order);
-              setPage(0);
+              pushQuery({ sort: next.field === "date" ? null : next.field, order: next.order === "desc" ? null : next.order, page: null });
             }}
             search={search}
-            onSearchChange={setSearch}
+            onSearchChange={(value) => pushQuery({ q: value || null, page: null })}
             merchantFilter={merchantFilter}
             onMerchantFilterChange={(merchants) => {
-              setMerchantFilter(merchants);
-              setPage(0);
+              pushQuery({ merchant: merchants, page: null });
             }}
             categoryFilter={categoryFilter}
             onCategoryFilterChange={(ids) => {
-              setCategoryFilter(ids);
-              setPage(0);
+              pushQuery({ category: ids.map(String), page: null });
             }}
             accountFilter={accountFilter}
             onAccountFilterChange={(ids) => {
-              setAccountFilter(ids);
-              setPage(0);
+              pushQuery({ account: ids.map(String), page: null });
             }}
             page={page}
-            onPageChange={setPage}
+            onPageChange={(nextPage) => pushQuery({ page: nextPage === 0 ? null : String(nextPage + 1) })}
           />
         </div>
       </div>
     </>
   );
 }
-

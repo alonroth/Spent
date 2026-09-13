@@ -33,6 +33,10 @@ interface CategoryGridProps {
   from: string;
   to: string;
   viewMode: CategoryViewMode;
+  filter: Filter;
+  onFilterChange: (filter: Filter) => void;
+  sort: Sort;
+  onSortChange: (sort: Sort) => void;
 }
 
 function applySort(list: CategoryWithData[], sort: Sort): CategoryWithData[] {
@@ -69,10 +73,12 @@ export function CategoryGrid({
   from,
   to,
   viewMode,
+  filter,
+  onFilterChange,
+  sort,
+  onSortChange,
 }: CategoryGridProps) {
   const t = useTranslations("dashboard");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [sort, setSort] = useState<Sort>("most-spent");
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const filterLabels: { id: Filter; label: string }[] = [
@@ -199,7 +205,7 @@ export function CategoryGrid({
               return (
                 <button
                   key={f.id}
-                  onClick={() => setFilter(f.id)}
+                  onClick={() => onFilterChange(f.id)}
                   className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                     active
                       ? "bg-foreground text-background shadow-sm"
@@ -219,7 +225,7 @@ export function CategoryGrid({
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{t("sortLabel")}</span>
-          <Select value={sort} onValueChange={(v) => v && setSort(v as Sort)}>
+          <Select value={sort} onValueChange={(v) => v && onSortChange(v as Sort)}>
             <SelectTrigger className="h-8 w-[150px] cursor-pointer border-none bg-transparent transition-colors duration-200 hover:bg-secondary hover:text-foreground">
               <SelectValue />
             </SelectTrigger>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { getSummary } from "@/lib/api";
@@ -15,6 +15,8 @@ import { AINotConnectedBanner } from "@/components/ai-not-connected-banner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { CategoryViewMode } from "@/lib/types";
 import type { Locale } from "@/i18n/routing";
+import { useUrlQueryState } from "@/hooks/use-url-query-state";
+import { readEnum, readPeriod } from "@/lib/url-state";
 
 const VIEW_MODE_KEY = "spent.dashboard.viewMode";
 
@@ -31,41 +33,50 @@ function readViewMode(): CategoryViewMode {
 export function Dashboard() {
   const t = useTranslations("dashboard");
   const locale = useLocale() as Locale;
-  const [period, setPeriod] = useState<
-    | { mode: "month"; month: string }
-    | { mode: "range"; from: string; to: string }
-  >(() => {
-    const now = new Date();
-    return { mode: "month", month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}` };
-  });
-  const [viewMode, setViewMode] = useState<CategoryViewMode>(readViewMode);
+  const { searchParams, pushQuery } = useUrlQueryState();
+  const period = readPeriod(searchParams);
+  const urlViewMode = searchParams.get("view");
+  const viewMode = urlViewMode === "expanded" || urlViewMode === "collapsed" ? urlViewMode : readViewMode();
+  const filter = readEnum(searchParams, "status", ["all", "needs-action", "on-track", "heads-up", "over", "plenty-left"] as const, "all");
+  const sort = readEnum(searchParams, "sort", ["budgeted-first", "most-spent", "least-spent", "alphabetical", "over-pace"] as const, "most-spent");
   const queryClient = useQueryClient();
 
   const handleViewModeChange = useCallback((mode: CategoryViewMode) => {
-    setViewMode(mode);
+    pushQuery({ view: mode });
     try {
       window.localStorage.setItem(VIEW_MODE_KEY, mode);
     } catch {
       // Storage may be unavailable; in-memory state still works.
     }
-  }, []);
+  }, [pushQuery]);
+
+  useEffect(() => {
+    if (urlViewMode !== "expanded" && urlViewMode !== "collapsed") return;
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, urlViewMode);
+    } catch {
+      // Storage may be unavailable; URL state still works.
+    }
+  }, [urlViewMode]);
 
   const monthDate = (value: string) =>
     new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, 1);
   const monthValue = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   const selectedDate = period.mode === "month" ? monthDate(period.month) : monthDate(period.from);
-  const { from, to } = period.mode === "month" ? getMonthRange(selectedDate) : period;
+  const { from, to } = period.mode === "month"
+    ? getMonthRange(selectedDate)
+    : { from: `${period.from}-01`, to: getMonthRange(monthDate(period.to)).to };
 
   const shiftPeriod = (amount: number) => {
     if (period.mode === "month") {
-      setPeriod({ mode: "month", month: monthValue(addMonths(selectedDate, amount)) });
+      pushQuery({ month: monthValue(addMonths(selectedDate, amount)), from: null, to: null });
       return;
     }
-    setPeriod({
-      mode: "range",
-      from: getMonthRange(addMonths(monthDate(period.from), amount)).from,
-      to: getMonthRange(addMonths(monthDate(period.to), amount)).to,
+    pushQuery({
+      month: null,
+      from: monthValue(addMonths(monthDate(period.from), amount)),
+      to: monthValue(addMonths(monthDate(period.to), amount)),
     });
   };
 
@@ -83,7 +94,7 @@ export function Dashboard() {
 
   const monthLabel = period.mode === "month"
     ? formatMonthLabel(selectedDate, locale)
-    : `${formatMonth(period.from, locale)} – ${formatMonth(period.to, locale)}`;
+    : `${formatMonth(`${period.from}-01`, locale)} – ${formatMonth(`${period.to}-01`, locale)}`;
   const summary = summaryQuery.data;
 
   return (
@@ -101,13 +112,9 @@ export function Dashboard() {
               label={monthLabel}
               onPrev={() => shiftPeriod(-1)}
               onNext={() => shiftPeriod(1)}
-              onMonthChange={(month) => setPeriod({ mode: "month", month })}
-              onRangeApply={(rangeFrom, rangeTo) => setPeriod({
-                mode: "range",
-                from: `${rangeFrom}-01`,
-                to: getMonthRange(new Date(Number(rangeTo.slice(0, 4)), Number(rangeTo.slice(5, 7)), 0)).to,
-              })}
-              onReset={() => setPeriod({ mode: "month", month: monthValue(new Date()) })}
+              onMonthChange={(month) => pushQuery({ month, from: null, to: null })}
+              onRangeApply={(rangeFrom, rangeTo) => pushQuery({ month: null, from: rangeFrom.slice(0, 7), to: rangeTo.slice(0, 7) })}
+              onReset={() => pushQuery({ month: monthValue(new Date()), from: null, to: null })}
             />
             <CategorizeButton onApplied={handleSyncComplete} />
             <SyncButton onComplete={handleSyncComplete} />
@@ -144,6 +151,10 @@ export function Dashboard() {
           from={from}
           to={to}
           viewMode={viewMode}
+          filter={filter}
+          onFilterChange={(next) => pushQuery({ status: next === "all" ? null : next })}
+          sort={sort}
+          onSortChange={(next) => pushQuery({ sort: next === "most-spent" ? null : next })}
         />
       </div>
     </>

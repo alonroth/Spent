@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -31,8 +31,19 @@ import {
   getSummary,
 } from "@/lib/api";
 import type { Category, CategoryKind, CategoryWithData } from "@/lib/types";
+import { useUrlQueryState } from "@/hooks/use-url-query-state";
+import { readEnum } from "@/lib/url-state";
 
 export default function CategoriesSettingsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
+      <CategoriesSettingsContent />
+    </Suspense>
+  );
+}
+
+function CategoriesSettingsContent() {
+  const { searchParams, pushQuery } = useUrlQueryState();
   const { from, to } = getMonthRange();
   const { data: categories } = useQuery({
     queryKey: ["categories"],
@@ -43,8 +54,8 @@ export default function CategoriesSettingsPage() {
     queryFn: () => getSummary({ from, to }),
   });
 
-  const [search, setSearch] = useState("");
-  const [activeKind, setActiveKind] = useState<CategoryKind>("expense");
+  const search = searchParams.get("q") ?? "";
+  const activeKind = readEnum(searchParams, "kind", ["expense", "income"] as const, "expense");
   const [openId, setOpenId] = useState<number | null>(null);
 
   const dataByCategoryId = useMemo(() => {
@@ -99,13 +110,13 @@ export default function CategoriesSettingsPage() {
           <div className="inline-flex rounded-full border border-border bg-card p-0.5">
             <KindTab
               active={activeKind === "expense"}
-              onClick={() => setActiveKind("expense")}
+              onClick={() => pushQuery({ kind: null })}
             >
               Expense
             </KindTab>
             <KindTab
               active={activeKind === "income"}
-              onClick={() => setActiveKind("income")}
+              onClick={() => pushQuery({ kind: "income" })}
             >
               Income
             </KindTab>
@@ -114,7 +125,7 @@ export default function CategoriesSettingsPage() {
             <Search className="pointer-events-none absolute start-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground/70" />
             <Input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => pushQuery({ q: e.target.value || null })}
               placeholder="Search categories…"
               className="ps-8"
             />

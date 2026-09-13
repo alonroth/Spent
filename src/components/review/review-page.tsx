@@ -38,6 +38,7 @@ import type { Category, ReviewTransaction } from "@/lib/types";
 import type { Locale } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useUrlQueryState } from "@/hooks/use-url-query-state";
 
 type ReviewView =
   | { kind: "pending"; index: number }
@@ -57,14 +58,83 @@ function replaceCategory(
   };
 }
 
-export function ReviewPage() {
+function ReviewCategoryPicker({
+  current,
+  categories,
+  updating,
+  search,
+  onSearchChange,
+  onCategoryChange,
+}: {
+  current: ReviewTransaction;
+  categories: Category[];
+  updating: boolean;
+  search: string;
+  onSearchChange: (value: string) => void;
+  onCategoryChange: (category: Category) => void;
+}) {
   const t = useTranslations("review");
   const tCat = useTranslations("categoriesSeeded");
   const locale = useLocale() as Locale;
+  const visibleCategories = useMemo(() => {
+    const parentIds = new Set(categories.map((category) => category.parentId));
+    const query = search.trim().toLocaleLowerCase(locale);
+    return categories.filter((category) =>
+      !parentIds.has(category.id) &&
+      (!query || translateCategoryName(category.name, tCat).toLocaleLowerCase(locale).includes(query)),
+    );
+  }, [categories, locale, search, tCat]);
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="flex min-h-11 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-start text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        disabled={updating}
+      >
+        <span className="size-2.5 rounded-full" style={{ backgroundColor: current.categoryColor ?? "var(--muted-foreground)" }} />
+        <span className="flex-1">{current.categoryName ? translateCategoryName(current.categoryName, tCat) : t("uncategorized")}</span>
+        <Tag className="size-4 text-muted-foreground" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(22rem,calc(100vw-2rem))] p-0">
+        <div className="border-b p-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute start-2.5 top-2.5 size-3.5 text-muted-foreground" />
+            <Input autoFocus className="h-8 ps-8" placeholder={t("searchCategories")} value={search} onChange={(event) => onSearchChange(event.target.value)} />
+          </div>
+        </div>
+        <div className="max-h-64 overflow-y-auto p-1">
+          {(["expense", "income"] as const).map((kind) => {
+            const matchingCategories = visibleCategories.filter((category) => category.kind === kind);
+            if (matchingCategories.length === 0) return null;
+            return (
+              <div key={kind} className="pb-1">
+                <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {kind === "expense" ? t("expenseCategories") : t("incomeCategories")}
+                </p>
+                {matchingCategories.map((category) => (
+                  <button key={category.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-start text-sm hover:bg-accent focus:bg-accent focus:outline-none" onClick={() => onCategoryChange(category)}>
+                    <span className="size-2.5 rounded-full" style={{ backgroundColor: category.color }} />
+                    {translateCategoryName(category.name, tCat)}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+          {visibleCategories.length === 0 ? <p className="px-2 py-3 text-sm text-muted-foreground">{t("noCategories")}</p> : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function ReviewPage() {
+  const t = useTranslations("review");
+  const locale = useLocale() as Locale;
   const queryClient = useQueryClient();
+  const { searchParams, pushQuery } = useUrlQueryState();
+  const pickerQuery = searchParams.get("pickerQ") ?? "";
   const [history, setHistory] = useState<ReviewTransaction[]>([]);
   const [view, setView] = useState<ReviewView>({ kind: "pending", index: 0 });
-  const [categorySearch, setCategorySearch] = useState("");
   const [updating, setUpdating] = useState(false);
 
   const reviewQuery = useQuery({
@@ -81,21 +151,6 @@ export function ReviewPage() {
   const isHistory = view.kind === "history";
   const totalResolved = history.length;
   const totalAtSessionStart = totalResolved + queue.length;
-
-  const leafCategories = useMemo(
-    () => {
-      const categories = categoriesQuery.data ?? [];
-      return categories.filter((category) => !categories.some((candidate) => candidate.parentId === category.id));
-    },
-    [categoriesQuery.data],
-  );
-  const visibleCategories = useMemo(() => {
-    const query = categorySearch.trim().toLocaleLowerCase(locale);
-    if (!query) return leafCategories;
-    return leafCategories.filter((category) =>
-      translateCategoryName(category.name, tCat).toLocaleLowerCase(locale).includes(query),
-    );
-  }, [categorySearch, leafCategories, locale, tCat]);
 
   const invalidateRelated = () => {
     queryClient.invalidateQueries({ queryKey: ["review-queue"] });
@@ -289,45 +344,17 @@ export function ReviewPage() {
 
               <div>
                 <p className="mb-2 text-sm font-medium">{t("category")}</p>
-                <Popover>
-                  <PopoverTrigger
-                    className="flex min-h-11 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-start text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                    disabled={updating}
-                    onClick={() => setCategorySearch("")}
-                  >
-                    <span className="size-2.5 rounded-full" style={{ backgroundColor: current.categoryColor ?? "var(--muted-foreground)" }} />
-                    <span className="flex-1">{current.categoryName ? translateCategoryName(current.categoryName, tCat) : t("uncategorized")}</span>
-                    <Tag className="size-4 text-muted-foreground" />
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-[min(22rem,calc(100vw-2rem))] p-0">
-                    <div className="border-b p-2">
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute start-2.5 top-2.5 size-3.5 text-muted-foreground" />
-                        <Input autoFocus className="h-8 ps-8" placeholder={t("searchCategories")} value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} />
-                      </div>
-                    </div>
-                    <div className="max-h-64 overflow-y-auto p-1">
-                      {(["expense", "income"] as const).map((kind) => {
-                        const matchingCategories = visibleCategories.filter((category) => category.kind === kind);
-                        if (matchingCategories.length === 0) return null;
-                        return (
-                          <div key={kind} className="pb-1">
-                            <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              {kind === "expense" ? t("expenseCategories") : t("incomeCategories")}
-                            </p>
-                            {matchingCategories.map((category) => (
-                              <button key={category.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-start text-sm hover:bg-accent focus:bg-accent focus:outline-none" onClick={() => handleCategoryChange(category)}>
-                                <span className="size-2.5 rounded-full" style={{ backgroundColor: category.color }} />
-                                {translateCategoryName(category.name, tCat)}
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })}
-                      {visibleCategories.length === 0 ? <p className="px-2 py-3 text-sm text-muted-foreground">{t("noCategories")}</p> : null}
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                <ReviewCategoryPicker
+                  current={current}
+                  categories={categoriesQuery.data ?? []}
+                  updating={updating}
+                  search={pickerQuery}
+                  onSearchChange={(value) => pushQuery({ pickerQ: value || null })}
+                  onCategoryChange={(category) => {
+                    pushQuery({ pickerQ: null });
+                    handleCategoryChange(category);
+                  }}
+                />
                 <p className="mt-2 text-xs text-muted-foreground">{isHistory ? t("reviewedCategoryHint") : t("categoryHint")}</p>
               </div>
             </CardContent>

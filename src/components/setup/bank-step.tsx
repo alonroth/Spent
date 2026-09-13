@@ -19,6 +19,8 @@ import {
   deleteIntegration,
 } from "@/lib/api";
 import { ProviderBadge } from "./provider-badge";
+import { useUrlQueryState } from "@/hooks/use-url-query-state";
+import { readEnum } from "@/lib/url-state";
 import { TwoFactorSection } from "./two-factor-section";
 
 type Sub = "pick" | "form" | "ready";
@@ -41,8 +43,9 @@ interface BankStepProps {
 }
 
 export function BankStep({ onComplete }: BankStepProps) {
-  const [filter, setFilter] = useState<"all" | BankKind>("all");
-  const [search, setSearch] = useState("");
+  const { searchParams, pushQuery } = useUrlQueryState();
+  const filter = readEnum(searchParams, "bankKind", ["all", "bank", "card"] as const, "all");
+  const search = searchParams.get("bankQ") ?? "";
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingCredentialId, setEditingCredentialId] = useState<number | null>(
     null
@@ -159,9 +162,9 @@ export function BankStep({ onComplete }: BankStepProps) {
               total={BANK_PROVIDERS.length}
               connectedIds={connectedIds}
               filter={filter}
-              onFilter={setFilter}
+              onFilter={(value) => pushQuery({ bankKind: value === "all" ? null : value })}
               search={search}
-              onSearch={setSearch}
+              onSearch={(value) => pushQuery({ bankQ: value || null })}
               onPick={handlePick}
             />
 

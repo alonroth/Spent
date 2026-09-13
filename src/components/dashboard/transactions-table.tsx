@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -93,6 +93,90 @@ function isActionableReview(txn: TransactionWithCategory): boolean {
   return txn.needsReview && txn.status === "completed" && !txn.isExcluded;
 }
 
+function TransactionCategoryPicker({
+  categoryName,
+  categoryColor,
+  categories,
+  disabled,
+  search,
+  onSearchChange,
+  onChange,
+}: {
+  categoryName: string;
+  categoryColor: string | null;
+  categories: Category[];
+  disabled: boolean;
+  search: string;
+  onSearchChange: (value: string) => void;
+  onChange: (categoryId: number) => void;
+}) {
+  const t = useTranslations("transactions");
+  const tCat = useTranslations("categoriesSeeded");
+  const locale = useLocale() as Locale;
+  const visibleCategories = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase(locale);
+    return categories.filter((category) =>
+      translateCategoryName(category.name, tCat)
+        .toLocaleLowerCase(locale)
+        .includes(query),
+    );
+  }, [categories, locale, search, tCat]);
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="inline-flex"
+        disabled={disabled}
+      >
+        <Badge
+          variant="outline"
+          className="cursor-pointer transition-colors hover:bg-accent"
+          style={categoryColor ? {
+            borderColor: categoryColor + "40",
+            backgroundColor: categoryColor + "15",
+            color: categoryColor,
+          } : undefined}
+        >
+          {categoryName}
+        </Badge>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-0">
+        <div className="border-b border-border p-2">
+          <Input
+            aria-label={t("filterCategorySearch")}
+            autoFocus
+            className="h-8"
+            placeholder={t("filterCategorySearch")}
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+          />
+        </div>
+        {visibleCategories.map((category) => (
+          <button
+            type="button"
+            key={category.id}
+            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-start text-sm outline-none hover:bg-accent focus:bg-accent"
+            onClick={() => {
+              onSearchChange("");
+              onChange(category.id);
+            }}
+          >
+            <div className="me-2 h-2 w-2 rounded-full" style={{ backgroundColor: category.color }} />
+            {translateCategoryName(category.name, tCat)}
+          </button>
+        ))}
+        {visibleCategories.length === 0 ? (
+          <p className="px-2 py-2 text-xs text-muted-foreground">
+            {t("noCategorySearchResults")}
+          </p>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 interface TransactionsTableProps {
   transactions: TransactionWithCategory[];
   total: number;
@@ -117,6 +201,12 @@ interface TransactionsTableProps {
   totals?: TransactionTotals;
   totalsLoading?: boolean;
   focusId?: number;
+  merchantQuery: string;
+  onMerchantQueryChange: (value: string) => void;
+  categoryQuery: string;
+  onCategoryQueryChange: (value: string) => void;
+  pickerQuery: string;
+  onPickerQueryChange: (value: string) => void;
 }
 
 const PAGE_SIZE = 300;
@@ -145,6 +235,12 @@ export function TransactionsTable({
   totals,
   totalsLoading = false,
   focusId,
+  merchantQuery,
+  onMerchantQueryChange,
+  categoryQuery,
+  onCategoryQueryChange,
+  pickerQuery,
+  onPickerQueryChange,
 }: TransactionsTableProps) {
   const t = useTranslations("transactions");
   const tCat = useTranslations("categoriesSeeded");
@@ -152,9 +248,6 @@ export function TransactionsTable({
   const locale = useLocale() as Locale;
   const queryClient = useQueryClient();
   const [updatingId, setUpdatingId] = useState<number | null>(null);
-  const [categorySearch, setCategorySearch] = useState("");
-  const [categoryPickerSearch, setCategoryPickerSearch] = useState("");
-  const [merchantSearch, setMerchantSearch] = useState("");
   const totalPages = Math.ceil(total / PAGE_SIZE);
   useEffect(() => {
     if (!focusId) return;
@@ -291,21 +384,6 @@ export function TransactionsTable({
     queryFn: () => getCategories("expense"),
   });
 
-  const categoriesForKind = (rowKind: Kind): Category[] => {
-    if (rowKind === "income") return incomeCategoriesQuery.data ?? [];
-    if (rowKind === "expense") return expenseCategoriesQuery.data ?? [];
-    return [];
-  };
-
-  const filteredCategoryPickerOptions = (rowKind: Kind): Category[] => {
-    const query = categoryPickerSearch.trim().toLocaleLowerCase(locale);
-    return categoriesForKind(rowKind).filter((category) =>
-      translateCategoryName(category.name, tCat)
-        .toLocaleLowerCase(locale)
-        .includes(query),
-    );
-  };
-
   const accountOptions = integrations
     .map((integration) => {
       const info = BANK_PROVIDERS.find((b) => b.id === integration.provider);
@@ -356,10 +434,6 @@ export function TransactionsTable({
     t("filterAny"),
     (count) => t("filterSelectedCount", { count }),
   );
-  const filteredMerchants = merchants.filter((merchant) =>
-    merchant.toLocaleLowerCase(locale).includes(merchantSearch.trim().toLocaleLowerCase(locale)),
-  );
-
   const hasActiveFilters =
     categoryFilter.length > 0 || accountFilter.length > 0 || merchantFilter.length > 0;
 
@@ -379,9 +453,9 @@ export function TransactionsTable({
 
   const renderCategoryFilterOptions = (
     parentId: number | null,
-    depth: number
+    depth: number,
+    normalizedSearch: string,
   ): React.ReactNode[] => {
-    const normalizedSearch = categorySearch.trim().toLocaleLowerCase(locale);
     const categoryMatchesSearch = (category: Category): boolean => {
       if (!normalizedSearch) return true;
       if (translateCategoryName(category.name, tCat).toLocaleLowerCase(locale).includes(normalizedSearch)) {
@@ -433,7 +507,7 @@ export function TransactionsTable({
           </div>
         </MultiFilterOption>
       );
-      nodes.push(...renderCategoryFilterOptions(cat.id, depth + 1));
+      nodes.push(...renderCategoryFilterOptions(cat.id, depth + 1, normalizedSearch));
     }
     return nodes;
   };
@@ -461,24 +535,29 @@ export function TransactionsTable({
               displayValue={merchantDisplayValue}
               triggerClassName="w-[200px]"
               searchPlaceholder={t("filterMerchantSearch")}
-              searchValue={merchantSearch}
-              onSearchChange={setMerchantSearch}
+              searchValue={merchantQuery}
+              onSearchChange={onMerchantQueryChange}
               selectAllLabel={t("filterSelectAll")}
               clearLabel={t("filterClearSelection")}
               onSelectAll={() => onMerchantFilterChange(merchants)}
               onClear={() => onMerchantFilterChange([])}
             >
-              {filteredMerchants.map((merchant) => (
-                <MultiFilterOption
-                  key={merchant}
-                  selected={merchantFilter.includes(merchant)}
-                  onToggle={() =>
-                    onMerchantFilterChange(toggleFilterId(merchantFilter, merchant))
-                  }
-                >
-                  <span className="truncate">{merchant}</span>
-                </MultiFilterOption>
-              ))}
+              {(filterSearch) => {
+                const normalizedSearch = filterSearch.trim().toLocaleLowerCase(locale);
+                return merchants
+                  .filter((merchant) => merchant.toLocaleLowerCase(locale).includes(normalizedSearch))
+                  .map((merchant) => (
+                    <MultiFilterOption
+                      key={merchant}
+                      selected={merchantFilter.includes(merchant)}
+                      onToggle={() =>
+                        onMerchantFilterChange(toggleFilterId(merchantFilter, merchant))
+                      }
+                    >
+                      <span className="truncate">{merchant}</span>
+                    </MultiFilterOption>
+                  ));
+              }}
             </TransactionMultiFilter>
             {showAccountFilter ? (
               <TransactionMultiFilter
@@ -522,14 +601,18 @@ export function TransactionsTable({
               icon={Tags}
               displayValue={categoryDisplayValue}
               searchPlaceholder={t("filterCategorySearch")}
-              searchValue={categorySearch}
-              onSearchChange={setCategorySearch}
+              searchValue={categoryQuery}
+              onSearchChange={onCategoryQueryChange}
               selectAllLabel={t("filterSelectAll")}
               clearLabel={t("filterClearSelection")}
               onSelectAll={() => onCategoryFilterChange(allCategoryIds)}
               onClear={() => onCategoryFilterChange([])}
             >
-              {renderCategoryFilterOptions(null, 0)}
+              {(filterSearch) => renderCategoryFilterOptions(
+                null,
+                0,
+                filterSearch.trim().toLocaleLowerCase(locale),
+              )}
             </TransactionMultiFilter>
             {hasActiveFilters ? (
               <Button
@@ -707,67 +790,22 @@ export function TransactionsTable({
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
-                          <Popover>
-                            <PopoverTrigger
-                              className="inline-flex"
-                              disabled={updatingId === txn.id || locked}
-                              onClick={() => setCategoryPickerSearch("")}
-                            >
-                              <Badge
-                                variant="outline"
-                                className="cursor-pointer transition-colors hover:bg-accent"
-                                style={
-                                  txn.categoryColor
-                                    ? {
-                                        borderColor: txn.categoryColor + "40",
-                                        backgroundColor: txn.categoryColor + "15",
-                                        color: txn.categoryColor,
-                                      }
-                                    : undefined
-                                }
-                              >
-                                {categoryName}
-                              </Badge>
-                            </PopoverTrigger>
-                            <PopoverContent align="start" className="w-64 p-0">
-                              <div className="border-b border-border p-2">
-                                <Input
-                                  aria-label={t("filterCategorySearch")}
-                                  autoFocus
-                                  className="h-8"
-                                  placeholder={t("filterCategorySearch")}
-                                  value={categoryPickerSearch}
-                                  onChange={(event) =>
-                                    setCategoryPickerSearch(event.target.value)
-                                  }
-                                  onKeyDown={(event) => event.stopPropagation()}
-                                  onPointerDown={(event) => event.stopPropagation()}
-                                />
-                              </div>
-                              {filteredCategoryPickerOptions(categoryKind).map((cat) => (
-                                <button
-                                  type="button"
-                                  key={cat.id}
-                                  className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-start text-sm outline-none hover:bg-accent focus:bg-accent"
-                                  onClick={() => {
-                                    setCategoryPickerSearch("");
-                                    handleCategoryChange(txn.id, cat.id);
-                                  }}
-                                >
-                                  <div
-                                    className="me-2 h-2 w-2 rounded-full"
-                                    style={{ backgroundColor: cat.color }}
-                                  />
-                                  {translateCategoryName(cat.name, tCat)}
-                                </button>
-                              ))}
-                              {filteredCategoryPickerOptions(categoryKind).length === 0 ? (
-                                <p className="px-2 py-2 text-xs text-muted-foreground">
-                                  {t("noCategorySearchResults")}
-                                </p>
-                              ) : null}
-                            </PopoverContent>
-                          </Popover>
+                          <TransactionCategoryPicker
+                            categoryName={categoryName}
+                            categoryColor={txn.categoryColor}
+                            categories={categoryKind === "income"
+                              ? incomeCategoriesQuery.data ?? []
+                              : categoryKind === "expense"
+                                ? expenseCategoriesQuery.data ?? []
+                                : []}
+                            disabled={updatingId === txn.id || locked}
+                            search={pickerQuery}
+                            onSearchChange={onPickerQueryChange}
+                            onChange={(categoryId) => {
+                              onPickerQueryChange("");
+                              handleCategoryChange(txn.id, categoryId);
+                            }}
+                          />
                           {isActionableReview(txn) && (
                             <Button
                               size="sm"

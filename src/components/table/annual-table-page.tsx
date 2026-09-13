@@ -44,6 +44,8 @@ import type {
   CategoryKind,
   RecurringTransaction,
 } from "@/lib/types";
+import { useUrlQueryState } from "@/hooks/use-url-query-state";
+import { readPositiveInteger } from "@/lib/url-state";
 
 const monthNames = Array.from({ length: 12 }, (_, i) =>
   new Intl.DateTimeFormat(undefined, { month: "short" }).format(
@@ -51,8 +53,11 @@ const monthNames = Array.from({ length: 12 }, (_, i) =>
   ),
 );
 export function AnnualTablePage() {
-  const [year, setYear] = useState(new Date().getFullYear()),
-    [open, setOpen] = useState(false);
+  const { searchParams, pushQuery } = useUrlQueryState();
+  const currentYear = new Date().getFullYear();
+  const requestedYear = readPositiveInteger(searchParams, "year", currentYear);
+  const year = requestedYear >= 2000 && requestedYear <= 2100 ? requestedYear : currentYear;
+  const [open, setOpen] = useState(false);
   const table = useQuery({
     queryKey: ["annual-table", year],
     queryFn: () => getAnnualTable(year),
@@ -69,7 +74,7 @@ export function AnnualTablePage() {
           <div className="flex gap-2">
             <Select
               value={String(year)}
-              onValueChange={(v) => setYear(Number(v))}
+              onValueChange={(v) => pushQuery({ year: Number(v) === currentYear ? null : v })}
             >
               <SelectTrigger className="w-28">
                 <SelectValue />
