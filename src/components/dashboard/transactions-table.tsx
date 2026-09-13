@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -113,6 +113,8 @@ function TransactionCategoryPicker({
   const t = useTranslations("transactions");
   const tCat = useTranslations("categoriesSeeded");
   const locale = useLocale() as Locale;
+  const [open, setOpen] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const visibleCategories = useMemo(() => {
     const query = search.trim().toLocaleLowerCase(locale);
     return categories.filter((category) =>
@@ -122,8 +124,20 @@ function TransactionCategoryPicker({
     );
   }, [categories, locale, search, tCat]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const frame = requestAnimationFrame(() => {
+      contentRef.current
+        ?.querySelector<HTMLInputElement>("input")
+        ?.focus({ preventScroll: true });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         className="inline-flex"
         disabled={disabled}
@@ -140,11 +154,15 @@ function TransactionCategoryPicker({
           {categoryName}
         </Badge>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-0">
+      <PopoverContent
+        ref={contentRef}
+        align="start"
+        className="w-64 p-0"
+        initialFocus={false}
+      >
         <div className="border-b border-border p-2">
           <Input
             aria-label={t("filterCategorySearch")}
-            autoFocus
             className="h-8"
             placeholder={t("filterCategorySearch")}
             value={search}

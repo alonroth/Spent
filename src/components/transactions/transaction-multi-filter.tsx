@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Check, ChevronDown } from "lucide-react";
 import {
@@ -43,12 +43,26 @@ export function TransactionMultiFilter({
   showBulkActions = true,
   children,
 }: TransactionMultiFilterProps) {
+  const [open, setOpen] = useState(false);
   const [uncontrolledSearchValue, setUncontrolledSearchValue] = useState("");
+  const contentRef = useRef<HTMLDivElement>(null);
   const searchValue = controlledSearchValue ?? uncontrolledSearchValue;
   const triggerTitle = `${label}: ${displayValue}`;
 
+  useEffect(() => {
+    if (!open || !searchPlaceholder) return;
+
+    const frame = requestAnimationFrame(() => {
+      contentRef.current
+        ?.querySelector<HTMLInputElement>("input")
+        ?.focus({ preventScroll: true });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [open, searchPlaceholder]);
+
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         className={cn(
           "flex h-8 min-w-[160px] max-w-[220px] items-center justify-between gap-1 rounded-lg border border-input bg-transparent py-2 pe-2 ps-2.5 text-sm transition-colors outline-none select-none hover:bg-accent/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30",
@@ -66,10 +80,15 @@ export function TransactionMultiFilter({
         </div>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 p-0">
+      <PopoverContent
+        ref={contentRef}
+        align="end"
+        className="w-64 p-0"
+        initialFocus={false}
+      >
         {searchPlaceholder ? (
           <div className="border-b border-border p-2">
-            <Input aria-label={searchPlaceholder} autoFocus className="h-8" placeholder={searchPlaceholder} value={searchValue} onChange={(event) => (onSearchChange ?? setUncontrolledSearchValue)(event.target.value)} />
+            <Input aria-label={searchPlaceholder} className="h-8" placeholder={searchPlaceholder} value={searchValue} onChange={(event) => (onSearchChange ?? setUncontrolledSearchValue)(event.target.value)} />
           </div>
         ) : null}
         {showBulkActions ? (
