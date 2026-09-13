@@ -110,7 +110,8 @@ function eligibleRows(db: Database.Database, workspaceId: number): EligibleTrans
   return db.prepare(`
     SELECT id, account_number, provider, description,
            COALESCE(charged_currency, original_currency) AS currency,
-           charged_amount AS amount, substr(date, 1, 7) AS month
+           charged_amount AS amount,
+           substr(transaction_calendar_date(date), 1, 7) AS month
     FROM transactions
     WHERE workspace_id = ?
       AND source = 'bank'

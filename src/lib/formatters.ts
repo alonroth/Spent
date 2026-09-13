@@ -1,4 +1,8 @@
 import type { Locale } from "@/i18n/routing";
+import {
+  parseCalendarDate,
+  transactionCalendarDate,
+} from "@/lib/calendar-date";
 
 function bcp47(locale: Locale | "en-IL" | "he-IL" | undefined): string {
   if (!locale) return "en-IL";
@@ -39,15 +43,12 @@ export function formatCurrency(
 }
 
 export function formatDate(isoDate: string): string {
-  const d = new Date(isoDate);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
+  const [year, month, day] = transactionCalendarDate(isoDate).split("-");
   return `${day}/${month}/${year}`;
 }
 
 export function formatMonth(isoDate: string, locale?: Locale): string {
-  const d = new Date(isoDate);
+  const d = parseCalendarDate(isoDate);
   return d.toLocaleDateString(bcp47(locale), { month: "short", year: "numeric" });
 }
 

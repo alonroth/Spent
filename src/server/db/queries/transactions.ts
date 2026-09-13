@@ -21,6 +21,7 @@ import {
   isTransactionSortField,
   TRANSACTION_SORT_SQL,
 } from "@/lib/transaction-sort";
+import { transactionCalendarDate } from "@/lib/calendar-date";
 export type TransactionKindFilter = "expense" | "income" | "all";
 
 export class DeploymentConflictError extends Error {}
@@ -410,11 +411,11 @@ export function queryTransactions(
   const values: (string | number)[] = [workspaceId];
 
   if (params.from) {
-    conditions.push("substr(t.date, 1, 10) >= ?");
+    conditions.push("transaction_calendar_date(t.date) >= ?");
     values.push(params.from);
   }
   if (params.to) {
-    conditions.push("substr(t.date, 1, 10) <= ?");
+    conditions.push("transaction_calendar_date(t.date) <= ?");
     values.push(params.to);
   }
   if (params.search) {
@@ -493,11 +494,11 @@ export function getTransactionTotals(
   const values: (string | number)[] = [workspaceId];
 
   if (params.from) {
-    conditions.push("substr(t.date, 1, 10) >= ?");
+    conditions.push("transaction_calendar_date(t.date) >= ?");
     values.push(params.from);
   }
   if (params.to) {
-    conditions.push("substr(t.date, 1, 10) <= ?");
+    conditions.push("transaction_calendar_date(t.date) <= ?");
     values.push(params.to);
   }
   if (params.search) {
@@ -556,7 +557,7 @@ export function getReviewTransactions(
     .prepare(
       `${TRANSACTION_LIST_SELECT}
        ${where}
-       ORDER BY substr(t.date, 1, 10) DESC, t.id DESC`,
+       ORDER BY transaction_calendar_date(t.date) DESC, t.id DESC`,
     )
     .all(workspaceId);
 
@@ -575,11 +576,11 @@ export function getTransactionMerchants(
   const conditions: string[] = ["workspace_id = ?"];
   const values: (string | number)[] = [workspaceId];
   if (params.from) {
-    conditions.push("substr(date, 1, 10) >= ?");
+    conditions.push("transaction_calendar_date(date) >= ?");
     values.push(params.from);
   }
   if (params.to) {
-    conditions.push("substr(date, 1, 10) <= ?");
+    conditions.push("transaction_calendar_date(date) <= ?");
     values.push(params.to);
   }
   if (params.kind === "income") conditions.push("charged_amount > 0");
@@ -671,13 +672,14 @@ export function getMonthlySummary(
   workspaceId: number,
   months: number
 ): MonthlySummary[] {
+  const today = transactionCalendarDate(new Date().toISOString());
   return getDb()
     .prepare(
-      `SELECT strftime('%Y-%m', date) as month,
+      `SELECT substr(transaction_calendar_date(date), 1, 7) as month,
               SUM(ABS(charged_amount)) as amount
        FROM transactions
        WHERE workspace_id = ?
-         AND date >= date('now', '-' || ? || ' months')
+         AND transaction_calendar_date(date) >= date(?, '-' || ? || ' months')
          AND status = 'completed'
          AND kind = 'expense'
          AND is_excluded = 0
@@ -685,7 +687,7 @@ export function getMonthlySummary(
        GROUP BY month
        ORDER BY month ASC`
     )
-    .all(workspaceId, months) as MonthlySummary[];
+    .all(workspaceId, today, months) as MonthlySummary[];
 }
 
 export function getTopMerchants(
@@ -700,7 +702,7 @@ export function getTopMerchants(
               SUM(ABS(charged_amount)) as amount,
               COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense'
+       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense'
          AND is_excluded = 0
          AND is_deployed = 0
        GROUP BY description
@@ -725,7 +727,7 @@ export function getCategoryBreakdown(
          COUNT(*) as count
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.workspace_id = ? AND substr(t.date, 1, 10) >= ? AND substr(t.date, 1, 10) <= ? AND t.status = 'completed' AND t.kind = 'expense'
+       WHERE t.workspace_id = ? AND transaction_calendar_date(t.date) >= ? AND transaction_calendar_date(t.date) <= ? AND t.status = 'completed' AND t.kind = 'expense'
          AND t.is_excluded = 0
          AND t.is_deployed = 0
        GROUP BY t.category_id
@@ -751,7 +753,7 @@ export function getCategorySpendInRange(
               SUM(ABS(charged_amount)) as amount,
               COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
+       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
          AND is_excluded = 0
          AND is_deployed = 0
        GROUP BY category_id`
@@ -777,7 +779,7 @@ export function getTopMerchantPerCategory(
          SELECT category_id, description, SUM(ABS(charged_amount)) as amount,
                 ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY SUM(ABS(charged_amount)) DESC) as rn
          FROM transactions
-         WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
+         WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense' AND category_id IS NOT NULL
            AND is_excluded = 0
            AND is_deployed = 0
          GROUP BY category_id, description
@@ -809,7 +811,7 @@ export function getCategorySpendByDay(
               COALESCE(SUM(ABS(t.charged_amount)), 0) as amount
        FROM days
        LEFT JOIN transactions t
-         ON substr(t.date, 1, 10) = days.d
+         ON transaction_calendar_date(t.date) = days.d
          AND t.workspace_id = ?
          AND t.category_id = ?
          AND t.kind = 'expense'
@@ -842,7 +844,7 @@ export function getTopMerchantsForCategory(
               COUNT(*) as count
        FROM transactions
        WHERE workspace_id = ? AND category_id = ?
-         AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ?
+         AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ?
          AND status = 'completed'
          AND kind = 'expense'
          AND is_excluded = 0
@@ -863,7 +865,7 @@ export function getPeriodTotal(
     .prepare(
       `SELECT COALESCE(SUM(ABS(charged_amount)), 0) as total
        FROM transactions
-       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense'
+       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense'
          AND is_excluded = 0
          AND is_deployed = 0`
     )
@@ -880,7 +882,7 @@ export function getPeriodCount(
     .prepare(
       `SELECT COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ? AND status = 'completed' AND kind = 'expense'
+       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ? AND status = 'completed' AND kind = 'expense'
          AND is_excluded = 0`
     )
     .get(workspaceId, from, to) as { count: number };
@@ -1067,8 +1069,8 @@ export function getTransactionsSummary(
   const db = getDb();
   const baseConditions = [
     "workspace_id = ?",
-    "substr(date, 1, 10) >= ?",
-    "substr(date, 1, 10) <= ?",
+    "transaction_calendar_date(date) >= ?",
+    "transaction_calendar_date(date) <= ?",
     "status = 'completed'",
     "is_excluded = 0",
     "is_deployed = 0",
@@ -1103,8 +1105,8 @@ export function getTransactionsSummary(
     const cmp = sign === "income" ? "> 0" : "< 0";
     const tConditions = [
       "t.workspace_id = ?",
-      "substr(t.date, 1, 10) >= ?",
-      "substr(t.date, 1, 10) <= ?",
+      "transaction_calendar_date(t.date) >= ?",
+      "transaction_calendar_date(t.date) <= ?",
       "t.status = 'completed'",
       "t.is_excluded = 0",
       "t.is_deployed = 0",
@@ -1170,7 +1172,7 @@ export function getNeedsReviewCountByCategory(
     .prepare(
       `SELECT category_id as categoryId, COUNT(*) as count
        FROM transactions
-       WHERE workspace_id = ? AND substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ?
+       WHERE workspace_id = ? AND transaction_calendar_date(date) >= ? AND transaction_calendar_date(date) <= ?
          AND status = 'completed'
          AND kind = 'expense'
          AND needs_review = 1
@@ -1179,4 +1181,3 @@ export function getNeedsReviewCountByCategory(
     )
     .all(workspaceId, from, to) as NeedsReviewCount[];
 }
-

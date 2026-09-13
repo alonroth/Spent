@@ -9,6 +9,7 @@ import { getAllBudgets, getAutoBudgetAverage } from "@/server/db/queries/budgets
 import { toLocalISODate } from "@/server/lib/date-utils";
 import { getWorkspaceIdFromRequest } from "@/server/lib/workspace-context";
 import type { BudgetSource } from "@/lib/types";
+import { parseCalendarDate } from "@/lib/calendar-date";
 
 export async function GET(
   request: Request,
@@ -30,7 +31,7 @@ export async function GET(
   const from = searchParams.get("from") ?? defaultFrom;
   const to = searchParams.get("to") ?? defaultTo;
 
-  const fromDate = new Date(from);
+  const fromDate = parseCalendarDate(from);
   const prevMonthStart = new Date(
     fromDate.getFullYear(),
     fromDate.getMonth() - 1,
