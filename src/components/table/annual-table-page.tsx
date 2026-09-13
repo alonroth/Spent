@@ -1,6 +1,11 @@
 "use client";
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { AlertTriangle, GripVertical, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/app-shell";
 import { BudgetDetailSheet } from "@/components/dashboard/budget-detail-sheet";
@@ -88,7 +93,7 @@ export function AnnualTablePage() {
         {table.isPending ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : table.data ? (
-          <AnnualGrid key={table.data.year} data={table.data} />
+          <AnnualGrid key={JSON.stringify(table.data.sections)} data={table.data} />
         ) : null}
         <RecurringList rules={recurring.data ?? []} />
       </main>
@@ -107,6 +112,7 @@ function AnnualGrid({ data }: { data: AnnualTablePayload }) {
     from: string;
     to: string;
   } | null>(null);
+
   const openCategory = (categoryId: number, monthIndex?: number) => {
     if (monthIndex === undefined) {
       setSelection({
@@ -404,15 +410,27 @@ function Footer({
     </tr>
   );
 }
+async function invalidateRecurringLedgerQueries(qc: QueryClient) {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: ["recurring-transactions"] }),
+    qc.invalidateQueries({ queryKey: ["annual-table"] }),
+    qc.invalidateQueries({ queryKey: ["transactions"] }),
+    qc.invalidateQueries({ queryKey: ["transaction-merchants"] }),
+    qc.invalidateQueries({ queryKey: ["transactions-totals"] }),
+    qc.invalidateQueries({ queryKey: ["transactions-summary"] }),
+    qc.invalidateQueries({ queryKey: ["summary"] }),
+    qc.invalidateQueries({ queryKey: ["home"] }),
+    qc.invalidateQueries({ queryKey: ["categories"] }),
+    qc.invalidateQueries({ queryKey: ["category-detail"] }),
+    qc.invalidateQueries({ queryKey: ["review-queue"] }),
+  ]);
+}
+
 function RecurringList({ rules }: { rules: RecurringTransaction[] }) {
   const qc = useQueryClient();
-  const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["recurring-transactions"] });
-    qc.invalidateQueries({ queryKey: ["annual-table"] });
-  };
   const del = useMutation({
     mutationFn: deleteRecurringTransaction,
-    onSuccess: refresh,
+    onSuccess: () => invalidateRecurringLedgerQueries(qc),
   });
   const toggle = useMutation({
     mutationFn: (r: RecurringTransaction) =>
@@ -425,7 +443,7 @@ function RecurringList({ rules }: { rules: RecurringTransaction[] }) {
         endMonth: r.endMonth,
         active: !r.active,
       }),
-    onSuccess: refresh,
+    onSuccess: () => invalidateRecurringLedgerQueries(qc),
   });
   return (
     <section className="rounded-xl border bg-card p-4">
@@ -510,9 +528,15 @@ function RecurringDialog({
         startMonth,
         endMonth: endMonth || null,
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["annual-table"] });
-      qc.invalidateQueries({ queryKey: ["recurring-transactions"] });
+    onSuccess: (rule) => {
+      qc.setQueryData<RecurringTransaction[]>(
+        ["recurring-transactions"],
+        (current = []) => [...current, rule].sort((a, b) =>
+          Number(b.active) - Number(a.active) ||
+          a.description.localeCompare(b.description),
+        ),
+      );
+      void invalidateRecurringLedgerQueries(qc);
       onOpenChange(false);
     },
   });
